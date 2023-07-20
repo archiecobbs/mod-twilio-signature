@@ -17,11 +17,15 @@
  * limitations under the License.
  */
 
+#include "apr_lib.h"
+#include "ap_config.h"
+
+#include <assert.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
 
-#include "util.h"
+#include "hmac.h"
 
 #if OPENSSL_VERSION_NUMBER >= 0x30000000
 
@@ -59,6 +63,9 @@ static struct hmac_ctx *hmac_new(apr_pool_t *pool, const EVP_MD *md,
 
 #endif
 
+// Internal functions
+static apr_status_t     hmac_cleanup(void *ptr);
+
 struct hmac_engine *
 hmac_engine_create(apr_pool_t *p)
 {
@@ -67,7 +74,6 @@ hmac_engine_create(apr_pool_t *p)
     // Allocate structure
     if ((engine = apr_pcalloc(p, sizeof(*engine))) == NULL)
         return NULL;
-    engine->pool = p;
 
     // Get HMAC(s)
 #if OPENSSL_VERSION_NUMBER >= 0x30000000
@@ -85,22 +91,22 @@ hmac_engine_create(apr_pool_t *p)
 }
 
 struct hmac_ctx *
-hmac_new_sha1(struct hmac_engine *engine, const void *key, size_t keylen)
+hmac_new_sha1(apr_pool_t *pool, struct hmac_engine *engine, const void *key, size_t keylen)
 {
 #if OPENSSL_VERSION_NUMBER >= 0x30000000
-    return hmac_new(engine, engine->hmac, "SHA1", SHA_DIGEST_LENGTH, key, keylen);
+    return hmac_new(pool, engine->hmac, "SHA1", SHA_DIGEST_LENGTH, key, keylen);
 #else
-    return hmac_new(engine, engine->mac_sha1, SHA_DIGEST_LENGTH, key, keylen);
+    return hmac_new(pool, engine->mac_sha1, SHA_DIGEST_LENGTH, key, keylen);
 #endif
 }
 
 struct hmac_ctx *
-hmac_new_sha256(struct hmac_engine *engine, const void *key, size_t keylen)
+hmac_new_sha256(apr_pool_t *pool, struct hmac_engine *engine, const void *key, size_t keylen)
 {
 #if OPENSSL_VERSION_NUMBER >= 0x30000000
-    return hmac_new(engine, engine->hmac, "SHA256", SHA256_DIGEST_LENGTH, key, keylen);
+    return hmac_new(pool, engine->hmac, "SHA256", SHA256_DIGEST_LENGTH, key, keylen);
 #else
-    return hmac_new(engine, engine->mac_sha256, SHA256_DIGEST_LENGTH, key, keylen);
+    return hmac_new(pool, engine->mac_sha256, SHA256_DIGEST_LENGTH, key, keylen);
 #endif
 }
 
@@ -136,11 +142,7 @@ hmac_new(apr_pool_t *pool, const EVP_MD *md, size_t reslen, const void *key, siz
     hmac_reset(ctx, key, keylen);
 
     // Register cleanup
-#if OPENSSL_VERSION_NUMBER >= 0x30000000
-    apr_pool_cleanup_register(pool, ctx->ctx, EVP_MAC_CTX_free, NULL);
-#else
-    apr_pool_cleanup_register(pool, ctx->ctx, HMAC_CTX_free, NULL);
-#endif
+    apr_pool_cleanup_register(pool, ctx->ctx, hmac_cleanup, hmac_cleanup);
 
     // Done
     return ctx;
@@ -195,4 +197,15 @@ int
 hmac_result_length(struct hmac_ctx *ctx)
 {
     return ctx->reslen;
+}
+
+static apr_status_t
+hmac_cleanup(void *ptr)
+{
+#if OPENSSL_VERSION_NUMBER >= 0x30000000
+    EVP_MAC_CTX_free((EVP_MAC_CTX *)ptr);
+#else
+    HMAC_CTX_free((HMAC_CTX *)ptr);
+#endif
+    return APR_SUCCESS;
 }

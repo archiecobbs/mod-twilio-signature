@@ -19,9 +19,9 @@
 
 all-local:    module
 
-module: mod_twilio_signature.c
+module: mod_twilio_signature.c hmac.c
 		if test "$(srcdir)" != "."; then $(CP) $(srcdir)/mod_twilio_signature.c .; fi
-		$(APXS) -c -D_REENTRANT `echo $(GCC_WARN_FLAGS) | sed 's/ -/ -Wc,-/g'` -l crypto mod_twilio_signature.c
+		$(APXS) -c -D_REENTRANT `echo $(GCC_WARN_FLAGS) | sed 's/ -/ -Wc,-/g'` -l crypto $^
 
 install-exec-local: module
 		mkdir -p "$(DESTDIR)`$(APXS) -q LIBEXECDIR`"
