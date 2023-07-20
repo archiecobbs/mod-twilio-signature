@@ -17,7 +17,7 @@
 # limitations under the License.
 #
 
-AC_INIT([mod_twilio_signature Apache Module for Verifying Twilio Request Signatures], [1.0], [https://github.com/archiecobbs/mod-twilio-signature], [mod_twilio_signature])
+AC_INIT([mod_twilio_signature Apache Module for Verifying Twilio Request Signatures], [0.9.0], [https://github.com/archiecobbs/mod-twilio-signature], [mod_twilio_signature])
 AC_CONFIG_AUX_DIR(scripts)
 AM_INIT_AUTOMAKE
 dnl AM_MAINTAINER_MODE
