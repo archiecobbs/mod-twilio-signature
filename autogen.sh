@@ -35,7 +35,7 @@ AUTOCONF="autoconf"
 echo "cleaning up"
 rm -rf .libs autom4te*.cache scripts aclocal.m4 configure config.log config.status .deps stamp-h1
 rm -f *.o *.la *.lo *.slo Makefile.in Makefile
-rm -f mod_twilio_signature-?.?.?.tar.gz
+rm -f mod_twilio_signature-*.*.tar.gz
 rm -f config.h*
 rm -f TAGS tags
 
