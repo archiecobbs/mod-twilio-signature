@@ -1,29 +1,57 @@
 ## Overview
 
-**mod\_twilio\_signature** is an [Apache web server](http://en.wikipedia.org/wiki/Apache_HTTP_Server) module for authentication of incoming Twilio HTTP requests. Verification is performed by validating the `X-Twilio-Signature` HTTP header, which contains a base-64 encoded signature [described here](https://www.twilio.com/docs/usage/security#validating-requests).
+**mod\_twilio\_signature** is an [Apache web server](http://en.wikipedia.org/wiki/Apache_HTTP_Server) module for authentication of incoming Twilio HTTP requests.
 
-If a request is received that either doesn't contain a `X-Twilio-Signature` HTTP header, or contains an invalid signature, then a `401 Unauthorized` error status is returned.
+Verification is performed by validating the `X-Twilio-Signature` HTTP header, which contains a base-64 encoded signature [described here](https://www.twilio.com/docs/usage/security#validating-requests).
+
+When verification is enabled, if a request is received that either doesn't contain a `X-Twilio-Signature` HTTP header, or contains an invalid signature, then a `401 Unauthorized` error status is returned.
 
 ## Basic Configuration
 
-Configuration is straightforward. You need to tell Apache two things: (a) when to require the signature; and (b) the Twilio account authentication token (i.e., secret key) from which the signature is generated.
+Configuration is straightforward. You need to tell Apache two things:
 
-"When to require the signature" is defined in the normal Apache way, using `<Directory>` and `<Location>` tags, etc., and by the `TwilioSignatureRequired` directive.
+* When to validate the signature; and
+* The authentication token(s) the signature may be based on
 
-The auth token is specified via the `TwilioSignatureAuthToken` directive.
+The first item is defined using `TwilioSignatureRequired` directives inside `<Directory>` and `<Location>` tags.
 
-For example:
+The second item is defined using `TwilioSignatureAuthToken` and/or `TwilioSignatureAuthTokenFile` directives.
+
+For example, to require auth token `e25b2c593ab0def7e23c11d83349868a` for requests to URI paths starting with `/my/twilio/webapp`:
 
 ```
-<Location /my/twilio/webapp>
+<Location "/my/twilio/webapp">
     TwilioSignatureRequired yes
     TwilioSignatureAuthToken e25b2c593ab0def7e23c11d83349868a
 </Location>
 ```
 
-The `TwilioSignatureRequired` defaults to **no**. It's also possible to inherit an explicit **no** from an outer context when this directive is missing.
+Some important notes:
 
-Therefore, to be safe, **always specify `TwilioSignatureRequired yes` when you want to enforce signature validation**.
+* Authentication tokens are always **32 lowercase hex digits**
+* `TwilioSignatureRequired` defaults to **no**
+
+It's also possible to inherit an explicit **no** from an outer context.
+
+**Therefore, to be safe, always specify `TwilioSignatureRequired yes` when you want to enforce signature validation**.
+
+If you do something like this:
+
+```
+<Location "/">
+    TwilioSignatureAuthToken e25b2c593ab0def7e23c11d83349868a
+</Location>
+```
+
+you have not enabled validation, but you _have_ defined a valid token that will be inherited by more specific locations.
+
+So then you would be able to just do this:
+
+```
+<Location "/more/specific/location">
+    TwilioSignatureRequired yes
+</Location>
+```
 
 ## Advanced Configuration
 
@@ -32,7 +60,7 @@ Therefore, to be safe, **always specify `TwilioSignatureRequired yes` when you w
 You can specify more than one auth token, for example, if multiple Twilio accounts are allowed to hit the same webhook:
 
 ```
-<Location /my/twilio/webapp>
+<Location "/my/twilio/webapp">
     TwilioSignatureRequired yes
     TwilioSignatureAuthToken e25b2c593ab0def7e23c11d83349868a
     TwilioSignatureAuthToken 50c58e17c65c7aea5c48602ccc599936
@@ -40,28 +68,34 @@ You can specify more than one auth token, for example, if multiple Twilio accoun
 </Location>
 ```
 
+Signatures can then be based on any of the tokens. However, avoid extremely long lists, because there's no way to know ahead of time which token is the right one - each token must be tried one at a time.
+
 ### Auth Tokens from a File
 
-Putting auth tokens in config files is somewhat insecure. Instead, you can store them in a file, which can be more securely protected (as long as the Apache process has permission to read the file).
+Putting auth tokens in config files is somewhat insecure. Instead, you can store them in a file, which can be more securely protected:
 
 ```
-<Location /my/twilio/webapp>
+<Location "/my/twilio/webapp">
     TwilioSignatureRequired yes
-    TwilioSignatureAuthTokenFile /etc/apache2/secrets/auth-tokens.txt
+    TwilioSignatureAuthTokenFile /etc/apache2/auth-tokens.txt
 </Location>
 ```
+File format notes:
+* The file must be a text file.
+* Lines that are blank, all whitespace, or start with `#` are ignored.
+* Otherwise, each line must contain one or more tokens separated by whitespace.
 
-The file is a text file. Lines that are blank or start with a `#` are ignored. Otherwise, each line must contain exactly 32 hex digits.
-
-The file is read once at startup (or after a server reload). If the file contains any bogus lines, startup fails.
-
-Note: it is _not_ an error if the file contains zero auth tokens.
+The file(s) are read at startup and on server reload.
 
 You may combine inline tokens via `TwilioSignatureAuthToken` and tokens from files via `TwilioSignatureAuthTokenFile`.
 
 ### Log Level
 
-When a request fails to authenticate, a message is logged at level INFO. If necessary for debugging, you can increase this using [Per-module logging](https://httpd.apache.org/docs/current/logs.html#permodule).
+When a request fails to authenticate, a message is logged at level INFO.
+
+All other messages are logged at level TRACE1.
+
+If necessary for debugging, you can increase the logging level using [Per-module logging](https://httpd.apache.org/docs/current/logs.html#permodule).
 
 For example:
 
@@ -74,14 +108,14 @@ LogLevel twilio_signature:warn
 You can override the URI used in the signature calculation. This might be needed if there is a proxy between Twilio and Apache.
 
 ```
-<Location /private/foobar>
+<Location "/private/foobar">
     TwilioSignatureRequired yes
-    TwilioSignatureAuthTokenFile /etc/apache2/secrets/tokens1.txt
+    TwilioSignatureAuthTokenFile /etc/apache2/auth-tokens.txt
     TwilioSignatureOverrideURI https://public.website.com/some/path/foobar
 </Location>
 ```
 
-You can specify `TwilioSignatureOverrideURI None` to cancel any value inherited from an outer context. The `None` is case-insensitive.
+You can specify `TwilioSignatureOverrideURI None` to cancel any value inherited from an outer context.
 
 ### Config Merge
 
@@ -90,11 +124,11 @@ If you declare auth tokens in a context in which an outer context already had th
 For example:
 
 ```
-<Location /foo>
+<Location "/foo">
     TwilioSignatureRequired yes
     TwilioSignatureAuthTokenFile /etc/apache2/secrets/tokens1.txt
 </Location>
-<Location /foo/bar>
+<Location "/foo/bar">
     TwilioSignatureRequired yes
     TwilioSignatureAuthTokenFile /etc/apache2/secrets/tokens2.txt
 </Location>
@@ -102,3 +136,10 @@ For example:
 
 Then auth tokens from both `tokens1.txt` and `tokens2.txt` are accepted inside location `/foo/bar`.
 
+## Miscellaneous
+
+### Compatible Requests
+
+Twilio signatures are only defined for two types of requests: `GET` and `POST` with parameters encoded with `application/x-www-form-urlencoded` MIME type.
+
+Validation will fail for any other types of requests.
