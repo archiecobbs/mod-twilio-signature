@@ -17,8 +17,6 @@
  * limitations under the License.
  */
 
-//#include <openssl/bio.h>
-//#include <openssl/buffer.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
