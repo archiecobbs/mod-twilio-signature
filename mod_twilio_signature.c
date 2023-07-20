@@ -53,6 +53,7 @@
 
 // Defaults
 #define DEFAULT_ENABLED                 0                                   // default for TwilioSignatureRequired
+#define DEFAULT_SHOW_CALCULATION        0                                   // default for TwilioSignatureShowCalculation
 
 // One auth token in a list
 struct twilsig_token {
@@ -63,6 +64,7 @@ struct twilsig_token {
 // Module configuration
 struct twilsig_config {
     int                     enabled;            // 0 = no, 1 = yes, -1 = inherit
+    int                     show_calculation;   // 0 = no, 1 = yes, -1 = inherit
     const char              *override_uri;
     struct twilsig_token    *tokens;            // valid auth tokens
     struct hmac_engine      *engine;
@@ -112,6 +114,11 @@ static const command_rec twilio_signature_cmds[] =
         NULL,
         ACCESS_CONF,
         "override URI used in Twilio signature calculation"),
+    AP_INIT_FLAG("TwilioSignatureShowCalculation",
+        ap_set_flag_slot,
+        (void *)APR_OFFSETOF(struct twilsig_config, show_calculation),
+        ACCESS_CONF,
+        "enable debug logging of signature calculation"),
     { NULL }
 };
 
@@ -132,6 +139,7 @@ create_twilio_signature_dir_config(apr_pool_t *p, char *d)
     struct twilsig_config *conf = apr_pcalloc(p, sizeof(struct twilsig_config));
 
     conf->enabled = -1;
+    conf->show_calculation = -1;
     conf->engine = hmac_engine_create(p);
     return conf;
 }
@@ -146,6 +154,7 @@ merge_twilio_signature_dir_config(apr_pool_t *p, void *base_conf, void *new_conf
 
     // Merge flags
     conf->enabled = merge_flag(conf1->enabled, conf2->enabled);
+    conf->show_calculation = merge_flag(conf1->show_calculation, conf2->show_calculation);
 
     // Merge override URI
     if (conf2->override_uri != NULL)
@@ -256,6 +265,7 @@ static int
 check_twilio_signature(request_rec *r)
 {
     const struct twilsig_config *conf = ap_get_module_config(r->request_config, &twilio_signature_module);
+    const int show_calculation = read_flag(conf->show_calculation, DEFAULT_SHOW_CALCULATION);
     u_char signature[SIGNATURE_LENGTH_BINARY];
     u_char hmac[SIGNATURE_LENGTH_BINARY];
     const struct twilsig_token *token;
@@ -301,6 +311,8 @@ check_twilio_signature(request_rec *r)
 
     // Verify the signature matches some token in our auth token list
     token_count = 0;
+    if (show_calculation)
+        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: checking auth tokens for signature \"%s\"", header_value);
     for (token = conf->tokens; token != NULL; token = token->next) {
         token_count++;
         if (compute_signature(conf, token->token, r, hmac) == -1) {
@@ -308,9 +320,17 @@ check_twilio_signature(request_rec *r)
             return HTTP_UNAUTHORIZED;
         }
         if (memcmp(signature, hmac, SIGNATURE_LENGTH_BINARY) == 0) {
+            if (show_calculation) {
+                ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r,
+                  "twilio-signature: signature \"%s\" matched token #%d", header_value, token_count);
+            }
             ap_log_rerror(APLOG_MARK, APLOG_TRACE1, 0, r, "Twilio signature verified (via token #%d)", token_count);
             return DECLINED;
         }
+    }
+    if (show_calculation) {
+        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r,
+          "twilio-signature: signature \"%s\" failed to match %d token(s)", header_value, token_count);
     }
 
     // Not found
@@ -334,9 +354,14 @@ check_twilio_signature(request_rec *r)
 static int
 compute_signature(const struct twilsig_config *conf, const char *token, request_rec *r, u_char *hmac)
 {
+    const int show_calculation = read_flag(conf->show_calculation, DEFAULT_SHOW_CALCULATION);
     apr_array_header_t *params = NULL;
     const char *query_string;
     struct hmac_ctx *ctx;
+
+    // Debug
+    if (show_calculation)
+        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: computing signature using token \"%s\"", token);
 
     // Must be GET or POST
     switch (r->method_number) {
@@ -354,14 +379,22 @@ compute_signature(const struct twilsig_config *conf, const char *token, request_
     if (conf->override_uri && !strcasecmp(conf->override_uri, OVERRIDE_URI_NONE)) {
 
         // Digest the override URI
+        if (show_calculation)
+            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: digest URI \"%s\"", conf->override_uri);
         hmac_update(ctx, conf->override_uri, strlen(conf->override_uri));
 
         // Add the query string from *this* request (if any)
         query_string = strrchr(r->unparsed_uri, '?');
-        if (query_string != NULL)
+        if (query_string != NULL) {
+            if (show_calculation)
+                ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: digest query \"%s\"", query_string);
             hmac_update(ctx, query_string, strlen(query_string));
-    } else
+        }
+    } else {
+        if (show_calculation)
+            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: digest URI \"%s\"", r->unparsed_uri);
         hmac_update(ctx, r->unparsed_uri, strlen(r->unparsed_uri));
+    }
 
     // Add POST parameters from body
     if (r->method_number == M_POST) {
@@ -392,6 +425,10 @@ compute_signature(const struct twilsig_config *conf, const char *token, request_
             value[size] = '\0';
 
             // Digest name and value
+            if (show_calculation) {
+                ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: digest name \"%s\"", pair->name);
+                ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: digest value \"%s\"", value);
+            }
             hmac_update(ctx, pair->name, strlen(pair->name));
             hmac_update(ctx, value, strlen(value));
         }
@@ -399,6 +436,24 @@ compute_signature(const struct twilsig_config *conf, const char *token, request_
 
     // Finalize
     hmac_final(ctx, hmac);
+    if (show_calculation) {
+        char base64[SIGNATURE_LENGTH_BASE64 + 1];
+
+        apr_base64_encode(base64, (char *)hmac, SIGNATURE_LENGTH_BINARY);
+        base64[SIGNATURE_LENGTH_BASE64] = '\0';
+        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r,
+          "twilio-signature: signature using token \"%s\" is "
+          "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x"
+          " -> \"%s\"",
+          token,
+          hmac[ 0], hmac[ 1], hmac[ 2], hmac[ 3], hmac[ 4],
+          hmac[ 5], hmac[ 6], hmac[ 7], hmac[ 8], hmac[ 9],
+          hmac[10], hmac[11], hmac[12], hmac[13], hmac[14],
+          hmac[15], hmac[16], hmac[17], hmac[18], hmac[19],
+          base64);
+    }
+
+    // Done
     return 0;
 }
 

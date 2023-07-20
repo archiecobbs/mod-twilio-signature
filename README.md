@@ -89,7 +89,7 @@ The file(s) are read at startup and on server reload.
 
 You may combine inline tokens via `TwilioSignatureAuthToken` and tokens from files via `TwilioSignatureAuthTokenFile`.
 
-### Log Level
+### Logging Level
 
 When a request fails to authenticate, a message is logged at level INFO.
 
@@ -116,6 +116,12 @@ You can override the URI used in the signature calculation. This might be needed
 ```
 
 You can specify `TwilioSignatureOverrideURI None` to cancel any value inherited from an outer context.
+
+### Calculation Debug
+
+To enable logging of the details of the signature calculation algorithm for debugging purposes, use `TwilioSignatureShowCalculation on`. This will show, for each request, each authentication token tried and the data that digested to compute the signature hash.
+
+**Warning: this is insecure because it prints authentication tokens in the log.**
 
 ### Config Merge
 
