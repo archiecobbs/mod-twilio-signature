@@ -34,4 +34,4 @@ noinst_HEADERS=     hmac.h
 
 CLEANFILES=         *.la *.lo *.o *.so *.slo .libs/*
 
-EXTRA_DIST=         CHANGES LICENSE mod_twilio_signature.c hmac.c
+EXTRA_DIST=         CHANGES LICENSE README.md mod_twilio_signature.c hmac.c
