@@ -77,7 +77,7 @@ static int          configure_auth_token(apr_pool_t *pool, struct twilsig_config
 static void         add_auth_token_to_list(apr_pool_t *p, struct twilsig_token **listp, const char *token);
 static int          check_twilio_signature(request_rec *r);
 static int          compute_signature(const struct twilsig_config *conf, const char *token, request_rec *r, u_char *hmac);
-static int          compare_param_names(const void *const pair1, const void *const pair2);
+static int          compare_param_names(const void *const ptr1, const void *const ptr2);
 static int          merge_flag(int outer_flag, int inner_flag);
 static int          read_flag(int flag, int defaultValue);
 static void         register_hooks(apr_pool_t *p);
@@ -123,7 +123,7 @@ static const command_rec twilio_signature_cmds[] =
 };
 
 // Module declaration
-module AP_MODULE_DECLARE_DATA twilio_signature_module = {
+AP_DECLARE_MODULE(twilio_signature) = {
     STANDARD20_MODULE_STUFF,
     create_twilio_signature_dir_config,         // create per-dir config
     merge_twilio_signature_dir_config,          // merge per-dir config
@@ -412,24 +412,24 @@ compute_signature(const struct twilsig_config *conf, const char *token, request_
 
         // Digest the param names and values
         for (int i = 0; i < params->nelts; i++) {
-            const ap_form_pair_t *const pair = (const void *)(params->elts + (i * params->elt_size));
+            const ap_form_pair_t *const param = (const void *)(params->elts + (i * params->elt_size));
             apr_size_t size;
             apr_off_t len;
             char *value;
 
             // Get field value
-            apr_brigade_length(pair->value, 1, &len);
+            apr_brigade_length(param->value, 1, &len);
             size = (apr_size_t)len;
             value = apr_palloc(r->pool, size + 1);
-            apr_brigade_flatten(pair->value, value, &size);
+            apr_brigade_flatten(param->value, value, &size);
             value[size] = '\0';
 
             // Digest name and value
             if (show_calculation) {
-                ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: digest name \"%s\"", pair->name);
+                ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: digest name \"%s\"", param->name);
                 ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: digest value \"%s\"", value);
             }
-            hmac_update(ctx, pair->name, strlen(pair->name));
+            hmac_update(ctx, param->name, strlen(param->name));
             hmac_update(ctx, value, strlen(value));
         }
     }
@@ -460,10 +460,10 @@ compute_signature(const struct twilsig_config *conf, const char *token, request_
 static int
 compare_param_names(const void *const ptr1, const void *const ptr2)
 {
-    const ap_form_pair_t *const pair1 = ptr1;
-    const ap_form_pair_t *const pair2 = ptr2;
+    const ap_form_pair_t *const param1 = ptr1;
+    const ap_form_pair_t *const param2 = ptr2;
 
-    return strcmp(pair1->name, pair2->name);
+    return strcmp(param1->name, param2->name);
 }
 
 static void
