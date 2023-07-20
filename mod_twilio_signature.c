@@ -51,6 +51,9 @@
 #define SIGNATURE_LENGTH_BASE64         ((((SIGNATURE_LENGTH_BINARY * 8) + 23) / 24) * 4)
 #define INVALID_TOKEN_ERROR_MESSAGE     "invalid Twilio auth token (must be 32 lowercase hex digits)"
 
+// Defaults
+#define DEFAULT_ENABLED                 0                                   // default for TwilioSignatureRequired
+
 // One auth token in a list
 struct twilsig_token {
     char                    token[AUTH_TOKEN_LENGTH + 1];
@@ -73,6 +76,8 @@ static void         add_auth_token_to_list(apr_pool_t *p, struct twilsig_token *
 static int          check_twilio_signature(request_rec *r);
 static int          compute_signature(const struct twilsig_config *conf, const char *token, request_rec *r, u_char *hmac);
 static int          compare_param_names(const void *const pair1, const void *const pair2);
+static int          merge_flag(int outer_flag, int inner_flag);
+static int          read_flag(int flag, int defaultValue);
 static void         register_hooks(apr_pool_t *p);
 
 ///////////////////////
@@ -139,8 +144,8 @@ merge_twilio_signature_dir_config(apr_pool_t *p, void *base_conf, void *new_conf
     struct twilsig_config *const conf2 = new_conf;
     struct twilsig_token *token;
 
-    // Merge "enabled" setting
-    conf->enabled = conf2->enabled != -1 ? conf2->enabled : conf1->enabled;
+    // Merge flags
+    conf->enabled = merge_flag(conf1->enabled, conf2->enabled);
 
     // Merge override URI
     if (conf2->override_uri != NULL)
@@ -265,7 +270,7 @@ check_twilio_signature(request_rec *r)
     }
 
     // Is signature validation required?
-    if (conf->enabled < 1) {
+    if (read_flag(conf->enabled, DEFAULT_ENABLED)) {
         ap_log_rerror(APLOG_MARK, APLOG_TRACE1, 0, r, "Twilio signature verification disabled");
         return DECLINED;
     }
@@ -415,4 +420,21 @@ add_auth_token_to_list(apr_pool_t *p, struct twilsig_token **listp, const char *
     apr_cpystrn(copy->token, token, sizeof(copy->token));
     copy->next = *listp;
     *listp = copy;
+}
+
+static int
+merge_flag(int outer_flag, int inner_flag)
+{
+    return inner_flag != -1 ? inner_flag : outer_flag;
+}
+
+static int
+read_flag(int flag, int defaultValue)
+{
+    switch (flag) {
+    case -1:
+        return defaultValue;
+    default:
+        return flag;
+    }
 }
