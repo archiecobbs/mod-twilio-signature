@@ -63,6 +63,8 @@ You may combine inline tokens via `TwilioSignatureAuthToken` and tokens from fil
 
 When a request fails to authenticate, a message is logged at level INFO. If necessary for debugging, you can increase this using [Per-module logging](https://httpd.apache.org/docs/current/logs.html#permodule).
 
+For example:
+
 ```
 LogLevel twilio_signature:warn
 ```
@@ -100,4 +102,3 @@ For example:
 
 Then auth tokens from both `tokens1.txt` and `tokens2.txt` are accepted inside location `/foo/bar`.
 
-To provide a safe/conservative default, if you omit the `TwilioSignatureRequired`, then it defaults to `yes`. However, this default can be overridden in a containing context. Therefore, to be safe, **you should always explicitly specify `TwilioSignatureRequired yes` if you want signature checks enabled**.
