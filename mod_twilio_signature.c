@@ -76,7 +76,8 @@ static void         *merge_twilio_signature_dir_config(apr_pool_t *p, void *base
 static int          configure_auth_token(apr_pool_t *pool, struct twilsig_config *const conf, const char *token);
 static void         add_auth_token_to_list(apr_pool_t *p, struct twilsig_token **listp, const char *token);
 static int          check_twilio_signature(request_rec *r);
-static int          compute_signature(const struct twilsig_config *conf, const char *token, request_rec *r, u_char *hmac);
+static int          compute_signature(const struct twilsig_config *conf, const char *token,
+                        request_rec *r, apr_array_header_t *post_params, u_char *hmac);
 static int          compare_param_names(const void *const ptr1, const void *const ptr2);
 static int          merge_flag(int outer_flag, int inner_flag);
 static int          read_flag(int flag, int defaultValue);
@@ -266,6 +267,7 @@ check_twilio_signature(request_rec *r)
 {
     const struct twilsig_config *conf = ap_get_module_config(r->request_config, &twilio_signature_module);
     const int show_calculation = read_flag(conf->show_calculation, DEFAULT_SHOW_CALCULATION);
+    apr_array_header_t *post_params = NULL;
     u_char signature[SIGNATURE_LENGTH_BINARY];
     u_char hmac[SIGNATURE_LENGTH_BINARY];
     const struct twilsig_token *token;
@@ -309,13 +311,26 @@ check_twilio_signature(request_rec *r)
     memset(signature, 0, sizeof(signature));                // just to be safe
     apr_base64_decode_binary(signature, header_value);
 
+    // For POST requests, extract the name/value pairs from the body
+    if (r->method_number == M_POST) {
+
+        // Get POST parameters
+        if (ap_parse_form_data(r, NULL, &post_params, -1, HUGE_STRING_LEN) != OK || post_params == NULL) {
+            ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r, "Twilio signature required but request is not compatible");
+            return -1;
+        }
+
+        // Sort params by name
+        qsort(post_params->elts, post_params->nelts, post_params->elt_size, compare_param_names);
+    }
+
     // Verify the signature matches some token in our auth token list
     token_count = 0;
     if (show_calculation)
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: checking auth tokens for signature \"%s\"", header_value);
     for (token = conf->tokens; token != NULL; token = token->next) {
         token_count++;
-        if (compute_signature(conf, token->token, r, hmac) == -1) {
+        if (compute_signature(conf, token->token, r, post_params, hmac) == -1) {
             ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r, "Twilio signature required but request is not compatible");
             return HTTP_UNAUTHORIZED;
         }
@@ -352,10 +367,10 @@ check_twilio_signature(request_rec *r)
 }
 
 static int
-compute_signature(const struct twilsig_config *conf, const char *token, request_rec *r, u_char *hmac)
+compute_signature(const struct twilsig_config *conf, const char *token,
+    request_rec *r, apr_array_header_t *post_params, u_char *hmac)
 {
     const int show_calculation = read_flag(conf->show_calculation, DEFAULT_SHOW_CALCULATION);
-    apr_array_header_t *params = NULL;
     const char *query_string;
     struct hmac_ctx *ctx;
 
@@ -397,22 +412,9 @@ compute_signature(const struct twilsig_config *conf, const char *token, request_
     }
 
     // Add POST parameters from body
-    if (r->method_number == M_POST) {
-
-        // Get parameters
-        if (ap_parse_form_data(r, NULL, &params, -1, HUGE_STRING_LEN) != OK || params == NULL)
-            return -1;
-
-        // Copy array so we can modify it
-        if ((params = apr_array_copy(r->pool, params)) == NULL)
-            return -1;
-
-        // Sort params by name
-        qsort(params->elts, params->nelts, params->elt_size, compare_param_names);
-
-        // Digest the param names and values
-        for (int i = 0; i < params->nelts; i++) {
-            const ap_form_pair_t *const param = (const void *)(params->elts + (i * params->elt_size));
+    if (post_params != NULL) {
+        for (int i = 0; i < post_params->nelts; i++) {
+            const ap_form_pair_t *const param = (const void *)(post_params->elts + (i * post_params->elt_size));
             apr_size_t size;
             apr_off_t len;
             char *value;
