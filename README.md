@@ -100,7 +100,7 @@ If necessary for debugging, you can increase the logging level using [Per-module
 For example:
 
 ```
-LogLevel twilio_signature:warn
+LogLevel twilio_signature:trace1
 ```
 
 ### Override URI
@@ -119,7 +119,7 @@ You can specify `TwilioSignatureOverrideURI None` to cancel any value inherited 
 
 ### Calculation Debug
 
-To enable logging of the details of the signature calculation algorithm for debugging purposes, use `TwilioSignatureShowCalculation on`. This will show, for each request, each authentication token tried and the data that digested to compute the signature hash.
+To enable logging of the details of the signature calculation algorithm for debugging purposes, use `TwilioSignatureShowCalculation on`. This will show, for each request, each authentication token tried and the data that digested to compute the signature hash at log level DEBUG.
 
 **Warning: this is insecure because it prints authentication tokens in the log.**
 
