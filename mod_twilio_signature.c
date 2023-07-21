@@ -289,6 +289,7 @@ check_twilio_signature(request_rec *r)
     int ports[2];
     int https;
     int port;
+    int i;
 
     // If a subrequest, trust the main request to have done any check already
     if (!ap_is_initial_req(r)) {
@@ -346,9 +347,9 @@ check_twilio_signature(request_rec *r)
     if (conf->override_uri != NULL && strcasecmp(conf->override_uri, OVERRIDE_URI_NONE) == 0)
         ports[num_ports++] = 0;                                                 // port is ignored - override URI is used instead
     else {
-        ports[num_ports++] = port;                                              // explicit port is always possible
         if (port == (https ? DEFAULT_HTTPS_PORT : DEFAULT_HTTP_PORT))           // default port, so implicit port is also possible
             ports[num_ports++] = 0;
+        ports[num_ports++] = port;                                              // explicit port is always possible
     }
 
     // Verify the signature matches some token in our auth token list
@@ -357,8 +358,8 @@ check_twilio_signature(request_rec *r)
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: checking auth tokens for signature \"%s\"", header_value);
     for (token = conf->tokens; token != NULL; token = token->next) {
         token_count++;
-        while (num_ports-- > 0) {
-            if (compute_signature(conf, token->token, r, https, ports[num_ports], post_params, hmac) == -1) {
+        for (i = 0; i < num_ports; i++) {
+            if (compute_signature(conf, token->token, r, https, ports[i], post_params, hmac) == -1) {
                 ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r, "Twilio signature required but request is not compatible");
                 return HTTP_UNAUTHORIZED;
             }
