@@ -40,6 +40,8 @@
 
 #include <ctype.h>
 
+#include <mod_ssl.h>
+
 #include "hmac.h"
 
 // Macros
@@ -66,18 +68,21 @@ struct twilsig_config {
     int                     enabled;            // 0 = no, 1 = yes, -1 = inherit
     int                     show_calculation;   // 0 = no, 1 = yes, -1 = inherit
     const char              *override_uri;
+    apr_pool_t              *pool;
     struct twilsig_token    *tokens;            // valid auth tokens
     struct hmac_engine      *engine;
 };
 
 // Internal functions
-static void         *create_twilio_signature_dir_config(apr_pool_t *p, char *d);
-static void         *merge_twilio_signature_dir_config(apr_pool_t *p, void *base_conf, void *new_conf);
-static int          configure_auth_token(apr_pool_t *pool, struct twilsig_config *const conf, const char *token);
-static void         add_auth_token_to_list(apr_pool_t *p, struct twilsig_token **listp, const char *token);
+static void         *create_twilio_signature_dir_config(apr_pool_t *pool, char *d);
+static void         *merge_twilio_signature_dir_config(apr_pool_t *pool, void *base_conf, void *new_conf);
+static int          configure_auth_token(struct twilsig_config *const conf, const char *token);
+static void         add_auth_token_to_list(struct twilsig_config *const conf, const char *token);
 static int          check_twilio_signature(request_rec *r);
 static int          compute_signature(const struct twilsig_config *conf, const char *token,
-                        request_rec *r, apr_array_header_t *post_params, u_char *hmac);
+                        request_rec *r, int https, int port, apr_array_header_t *post_params, u_char *hmac);
+static void         digest(struct hmac_ctx *ctx, request_rec *r, int show_calculation, const char *description, const char *value);
+static int          connection_is_https(conn_rec *c);
 static int          compare_param_names(const void *const ptr1, const void *const ptr2);
 static int          merge_flag(int outer_flag, int inner_flag);
 static int          read_flag(int flag, int defaultValue);
@@ -135,20 +140,21 @@ AP_DECLARE_MODULE(twilio_signature) = {
 };
 
 static void *
-create_twilio_signature_dir_config(apr_pool_t *p, char *d)
+create_twilio_signature_dir_config(apr_pool_t *pool, char *d)
 {
-    struct twilsig_config *conf = apr_pcalloc(p, sizeof(struct twilsig_config));
+    struct twilsig_config *conf = apr_pcalloc(pool, sizeof(struct twilsig_config));
 
+    conf->pool = pool;
     conf->enabled = -1;
     conf->show_calculation = -1;
-    conf->engine = hmac_engine_create(p);
+    conf->engine = hmac_engine_create(conf->pool);
     return conf;
 }
 
 static void *
-merge_twilio_signature_dir_config(apr_pool_t *p, void *base_conf, void *new_conf)
+merge_twilio_signature_dir_config(apr_pool_t *pool, void *base_conf, void *new_conf)
 {
-    struct twilsig_config *conf = apr_pcalloc(p, sizeof(struct twilsig_config));
+    struct twilsig_config *conf = create_twilio_signature_dir_config(pool, NULL);
     struct twilsig_config *const conf1 = base_conf;
     struct twilsig_config *const conf2 = new_conf;
     struct twilsig_token *token;
@@ -159,15 +165,15 @@ merge_twilio_signature_dir_config(apr_pool_t *p, void *base_conf, void *new_conf
 
     // Merge override URI
     if (conf2->override_uri != NULL)
-        conf->override_uri = apr_pstrdup(p, conf2->override_uri);
+        conf->override_uri = apr_pstrdup(conf->pool, conf2->override_uri);
     else if (conf1->override_uri != NULL)
-        conf->override_uri = apr_pstrdup(p, conf1->override_uri);
+        conf->override_uri = apr_pstrdup(conf->pool, conf1->override_uri);
 
     // Merge the auth token lists by simply combining them
     for (token = conf1->tokens; token != NULL; token = token->next)
-        add_auth_token_to_list(p, &conf->tokens, token->token);
+        add_auth_token_to_list(conf, token->token);
     for (token = conf2->tokens; token != NULL; token = token->next)
-        add_auth_token_to_list(p, &conf->tokens, token->token);
+        add_auth_token_to_list(conf, token->token);
 
     // Done
     return conf;
@@ -188,7 +194,7 @@ handle_auth_token_directive(cmd_parms *cmd, void *config, const char *token)
 {
     struct twilsig_config *const conf = (struct twilsig_config *)config;
 
-    if (configure_auth_token(cmd->pool, conf, token) == -1)
+    if (configure_auth_token(conf, token) == -1)
         return apr_psprintf(cmd->pool, "%s", INVALID_TOKEN_ERROR_MESSAGE);
     return NULL;
 }
@@ -219,7 +225,7 @@ handle_auth_token_file_directive(cmd_parms *cmd, void *config, const char *path)
 
         // Add tokens
         while ((token = apr_strtok(buf, WHITESPACE, &last)) != NULL) {
-            if (configure_auth_token(cmd->pool, conf, token) == -1) {
+            if (configure_auth_token(conf, token) == -1) {
                 apr_file_close(file);
                 return apr_psprintf(cmd->pool, "line %d: %s", linenum, INVALID_TOKEN_ERROR_MESSAGE);
             }
@@ -236,12 +242,17 @@ handle_override_uri_directive(cmd_parms *cmd, void *config, const char *uri)
 {
     struct twilsig_config *const conf = (struct twilsig_config *)config;
 
+    // Sanity check
+    if (strncmp(uri, "https://", 8) != 0 && strncmp(uri, "http://", 7) != 0)
+        return apr_psprintf(cmd->pool, "invalid override URI \"%s\": must be an HTTP or HTTPS URI", uri);
+
+    // Update
     conf->override_uri = apr_pstrdup(cmd->pool, uri);
     return NULL;
 }
 
 static int
-configure_auth_token(apr_pool_t *pool, struct twilsig_config *const conf, const char *token)
+configure_auth_token(struct twilsig_config *const conf, const char *token)
 {
     const char *s;
 
@@ -254,7 +265,7 @@ configure_auth_token(apr_pool_t *pool, struct twilsig_config *const conf, const 
         return -1;
 
     // Add token
-    add_auth_token_to_list(pool, &conf->tokens, token);
+    add_auth_token_to_list(conf, token);
     return 0;
 }
 
@@ -265,15 +276,19 @@ configure_auth_token(apr_pool_t *pool, struct twilsig_config *const conf, const 
 static int
 check_twilio_signature(request_rec *r)
 {
-    const struct twilsig_config *conf = ap_get_module_config(r->request_config, &twilio_signature_module);
+    const struct twilsig_config *conf = ap_get_module_config(r->per_dir_config, &twilio_signature_module);
     const int show_calculation = read_flag(conf->show_calculation, DEFAULT_SHOW_CALCULATION);
     apr_array_header_t *post_params = NULL;
     u_char signature[SIGNATURE_LENGTH_BINARY];
     u_char hmac[SIGNATURE_LENGTH_BINARY];
     const struct twilsig_token *token;
     const char *header_value;
-    const char *s;
     int token_count;
+    const char *s;
+    int num_ports;
+    int ports[2];
+    int https;
+    int port;
 
     // If a subrequest, trust the main request to have done any check already
     if (!ap_is_initial_req(r)) {
@@ -282,7 +297,7 @@ check_twilio_signature(request_rec *r)
     }
 
     // Is signature validation required?
-    if (read_flag(conf->enabled, DEFAULT_ENABLED)) {
+    if (!read_flag(conf->enabled, DEFAULT_ENABLED)) {
         ap_log_rerror(APLOG_MARK, APLOG_TRACE1, 0, r, "Twilio signature verification disabled");
         return DECLINED;
     }
@@ -324,23 +339,37 @@ check_twilio_signature(request_rec *r)
         qsort(post_params->elts, post_params->nelts, post_params->elt_size, compare_param_names);
     }
 
+    // Determine the connection's SSL status and TCP port, and then whether to try explicit/implicit port in URL
+    https = r->connection != NULL && connection_is_https(r->connection);
+    port = r->connection != NULL && r->connection->local_addr != NULL ? r->connection->local_addr->port : 0;
+    num_ports = 0;
+    if (conf->override_uri != NULL && strcasecmp(conf->override_uri, OVERRIDE_URI_NONE) == 0)
+        ports[num_ports++] = 0;                                                 // port is ignored - override URI is used instead
+    else {
+        ports[num_ports++] = port;                                              // explicit port is always possible
+        if (port == (https ? DEFAULT_HTTPS_PORT : DEFAULT_HTTP_PORT))           // default port, so implicit port is also possible
+            ports[num_ports++] = 0;
+    }
+
     // Verify the signature matches some token in our auth token list
     token_count = 0;
     if (show_calculation)
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: checking auth tokens for signature \"%s\"", header_value);
     for (token = conf->tokens; token != NULL; token = token->next) {
         token_count++;
-        if (compute_signature(conf, token->token, r, post_params, hmac) == -1) {
-            ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r, "Twilio signature required but request is not compatible");
-            return HTTP_UNAUTHORIZED;
-        }
-        if (memcmp(signature, hmac, SIGNATURE_LENGTH_BINARY) == 0) {
-            if (show_calculation) {
-                ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r,
-                  "twilio-signature: signature \"%s\" matched token #%d", header_value, token_count);
+        while (num_ports-- > 0) {
+            if (compute_signature(conf, token->token, r, https, ports[num_ports], post_params, hmac) == -1) {
+                ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r, "Twilio signature required but request is not compatible");
+                return HTTP_UNAUTHORIZED;
             }
-            ap_log_rerror(APLOG_MARK, APLOG_TRACE1, 0, r, "Twilio signature verified (via token #%d)", token_count);
-            return DECLINED;
+            if (memcmp(signature, hmac, SIGNATURE_LENGTH_BINARY) == 0) {
+                if (show_calculation) {
+                    ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r,
+                      "twilio-signature: signature \"%s\" matched token #%d", header_value, token_count);
+                }
+                ap_log_rerror(APLOG_MARK, APLOG_TRACE1, 0, r, "Twilio signature verified (via token #%d)", token_count);
+                return DECLINED;
+            }
         }
     }
     if (show_calculation) {
@@ -367,15 +396,16 @@ check_twilio_signature(request_rec *r)
 }
 
 static int
-compute_signature(const struct twilsig_config *conf, const char *token,
-    request_rec *r, apr_array_header_t *post_params, u_char *hmac)
+compute_signature(const struct twilsig_config *conf, const char *token, request_rec *r,
+    int https, int port, apr_array_header_t *post_params, u_char *hmac)
 {
-    const int show_calculation = read_flag(conf->show_calculation, DEFAULT_SHOW_CALCULATION);
+    const int debug = read_flag(conf->show_calculation, DEFAULT_SHOW_CALCULATION);
     const char *query_string;
     struct hmac_ctx *ctx;
+    char port_buf[16];
 
     // Debug
-    if (show_calculation)
+    if (debug)
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: computing signature using token \"%s\"", token);
 
     // Must be GET or POST
@@ -391,24 +421,33 @@ compute_signature(const struct twilsig_config *conf, const char *token,
     ctx = hmac_new_sha1(r->pool, conf->engine, token, strlen(token));
 
     // Digest the URI
-    if (conf->override_uri && !strcasecmp(conf->override_uri, OVERRIDE_URI_NONE)) {
+    if (conf->override_uri != NULL && strcasecmp(conf->override_uri, OVERRIDE_URI_NONE) == 0) {
 
         // Digest the override URI
-        if (show_calculation)
-            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: digest URI \"%s\"", conf->override_uri);
-        hmac_update(ctx, conf->override_uri, strlen(conf->override_uri));
+        digest(ctx, r, debug, "override URI", conf->override_uri);
 
         // Add the query string from *this* request (if any)
         query_string = strrchr(r->unparsed_uri, '?');
-        if (query_string != NULL) {
-            if (show_calculation)
-                ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: digest query \"%s\"", query_string);
-            hmac_update(ctx, query_string, strlen(query_string));
-        }
+        if (query_string != NULL)
+            digest(ctx, r, debug, "query string", query_string);
     } else {
-        if (show_calculation)
-            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: digest URI \"%s\"", r->unparsed_uri);
-        hmac_update(ctx, r->unparsed_uri, strlen(r->unparsed_uri));
+
+        // Digest scheme
+        digest(ctx, r, debug, "scheme", https ? "https://" : "http://");
+        if (r->hostname == NULL)
+            return -1;
+
+        // Digest hostname
+        digest(ctx, r, debug, "hostname", r->hostname);
+
+        // Digest explicit port (if any)
+        if (port != 0) {
+            apr_snprintf(port_buf, sizeof(port_buf), ":%d", port);
+            digest(ctx, r, debug, "port", port_buf);
+        }
+
+        // Digest URI and query string (if any)
+        digest(ctx, r, debug, "URI path", r->unparsed_uri);
     }
 
     // Add POST parameters from body
@@ -427,18 +466,14 @@ compute_signature(const struct twilsig_config *conf, const char *token,
             value[size] = '\0';
 
             // Digest name and value
-            if (show_calculation) {
-                ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: digest name \"%s\"", param->name);
-                ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: digest value \"%s\"", value);
-            }
-            hmac_update(ctx, param->name, strlen(param->name));
-            hmac_update(ctx, value, strlen(value));
+            digest(ctx, r, debug, "param name", param->name);
+            digest(ctx, r, debug, "param value", value);
         }
     }
 
     // Finalize
     hmac_final(ctx, hmac);
-    if (show_calculation) {
+    if (debug) {
         char base64[SIGNATURE_LENGTH_BASE64 + 1];
 
         apr_base64_encode(base64, (char *)hmac, SIGNATURE_LENGTH_BINARY);
@@ -459,6 +494,22 @@ compute_signature(const struct twilsig_config *conf, const char *token,
     return 0;
 }
 
+static void
+digest(struct hmac_ctx *ctx, request_rec *r, int debug, const char *description, const char *value)
+{
+    if (debug)
+        ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r, "twilio-signature: digest %s \"%s\"", description, value);
+    hmac_update(ctx, value, strlen(value));
+}
+
+static int
+connection_is_https(conn_rec *c)
+{
+    int (*test_function)(conn_rec *c);
+
+    return ((test_function = APR_RETRIEVE_OPTIONAL_FN(ssl_is_https)) != NULL && (*test_function)(c));
+}
+
 static int
 compare_param_names(const void *const ptr1, const void *const ptr2)
 {
@@ -469,14 +520,14 @@ compare_param_names(const void *const ptr1, const void *const ptr2)
 }
 
 static void
-add_auth_token_to_list(apr_pool_t *p, struct twilsig_token **listp, const char *token)
+add_auth_token_to_list(struct twilsig_config *const conf, const char *token)
 {
     struct twilsig_token *copy;
 
-    copy = apr_pcalloc(p, sizeof(*copy));
+    copy = apr_pcalloc(conf->pool, sizeof(*copy));
     apr_cpystrn(copy->token, token, sizeof(copy->token));
-    copy->next = *listp;
-    *listp = copy;
+    copy->next = conf->tokens;
+    conf->tokens = copy;
 }
 
 static int
