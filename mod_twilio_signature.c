@@ -543,10 +543,5 @@ merge_flag(int outer_flag, int inner_flag)
 static int
 read_flag(int flag, int defaultValue)
 {
-    switch (flag) {
-    case -1:
-        return defaultValue;
-    default:
-        return flag;
-    }
+    return flag != -1 ? flag : defaultValue;
 }
