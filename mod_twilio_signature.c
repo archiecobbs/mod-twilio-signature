@@ -406,8 +406,11 @@ compute_signature(const struct twilsig_config *conf, const char *token, request_
     char port_buf[16];
 
     // Debug
-    if (debug)
-        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: computing signature using token \"%s\"", token);
+    if (debug) {
+        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r,
+          "twilio-signature: computing signature: https=%d, port=%d, token=\"%s\" override URI=\"%s\"",
+          https, port, token, conf->override_uri != NULL ? conf->override_uri : "(null)");
+    }
 
     // Must be GET or POST
     switch (r->method_number) {
@@ -499,7 +502,7 @@ static void
 digest(struct hmac_ctx *ctx, request_rec *r, int debug, const char *description, const char *value)
 {
     if (debug)
-        ap_log_rerror(APLOG_MARK, APLOG_WARNING, 0, r, "twilio-signature: digest %s \"%s\"", description, value);
+        ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: digest %s \"%s\"", description, value);
     hmac_update(ctx, value, strlen(value));
 }
 
