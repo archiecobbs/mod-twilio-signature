@@ -211,13 +211,13 @@ handle_auth_token_file_directive(cmd_parms *cmd, void *config, const char *path)
     char *last;
 
     // Open file
-    if ((status = apr_file_open(&file, path, APR_READ, 0, cmd->pool)) != 0) {
+    if ((status = apr_file_open(&file, path, APR_READ, 0, cmd->pool)) != APR_SUCCESS) {
         return apr_psprintf(cmd->pool, "can't open auth token file \"%s\": %s",
           path, apr_strerror(status, buf, sizeof(buf)));
     }
 
     // Scan lines of file for tokens
-    for (linenum = 1; apr_file_gets(buf, sizeof(buf), file) == 0; linenum++) {
+    for (linenum = 1; apr_file_gets(buf, sizeof(buf), file) == APR_SUCCESS; linenum++) {
 
         // Ignore lines starting with '#'
         if (*buf == '#')
