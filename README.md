@@ -149,3 +149,7 @@ Then auth tokens from both `tokens1.txt` and `tokens2.txt` are accepted inside l
 Twilio signatures are only defined for two types of requests: `GET` and `POST` with parameters encoded with `application/x-www-form-urlencoded` MIME type.
 
 Validation will fail for any other types of requests.
+
+## Download
+
+You can download the latest buildable release here: [mod_twilio_signature-0.9.0.tar.gz](https://archie-public.s3.amazonaws.com/mod-twilio-signature/mod_twilio_signature-0.9.0.tar.gz)
