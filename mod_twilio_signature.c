@@ -224,7 +224,7 @@ handle_auth_token_file_directive(cmd_parms *cmd, void *config, const char *path)
             continue;
 
         // Add tokens
-        while ((token = apr_strtok(buf, WHITESPACE, &last)) != NULL) {
+        for (token = apr_strtok(buf, WHITESPACE, &last); token != NULL; token = apr_strtok(NULL, WHITESPACE, &last)) {
             if (configure_auth_token(conf, token) == -1) {
                 apr_file_close(file);
                 return apr_psprintf(cmd->pool, "line %d: %s", linenum, INVALID_TOKEN_ERROR_MESSAGE);
