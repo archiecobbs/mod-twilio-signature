@@ -1,4 +1,4 @@
-Version Next
+Version 0.9.1 Released July 22, 2023
 
     - Fix potential buffer overflow on malformed signature
 
