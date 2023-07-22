@@ -279,7 +279,7 @@ check_twilio_signature(request_rec *r)
     const struct twilsig_config *conf = ap_get_module_config(r->per_dir_config, &twilio_signature_module);
     const int show_calculation = read_flag(conf->show_calculation, DEFAULT_SHOW_CALCULATION);
     apr_array_header_t *post_params = NULL;
-    u_char signature[SIGNATURE_LENGTH_BINARY];
+    u_char signature[SIGNATURE_LENGTH_BINARY + 2];      // padding required in case there are fewer equals signs than expected
     u_char hmac[SIGNATURE_LENGTH_BINARY];
     const struct twilsig_token *token;
     const char *header_value;
