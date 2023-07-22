@@ -152,4 +152,4 @@ Validation will fail for any other types of requests.
 
 ## Download
 
-You can download the latest buildable release here: [mod_twilio_signature-0.9.0.tar.gz](https://archie-public.s3.amazonaws.com/mod-twilio-signature/mod_twilio_signature-0.9.0.tar.gz)
+You can download the latest buildable release here: [mod_twilio_signature-0.9.1.tar.gz](https://archie-public.s3.amazonaws.com/mod-twilio-signature/mod_twilio_signature-0.9.1.tar.gz)
