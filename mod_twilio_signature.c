@@ -527,7 +527,15 @@ static void
 add_auth_token_to_list(struct twilsig_config *const conf, const char *token)
 {
     struct twilsig_token *copy;
+    struct twilsig_token *t;
 
+    // Is it already in the list?
+    for (t = conf->tokens; t != NULL; t = t->next) {
+        if (strcmp(t->token, token) == 0)
+            return;
+    }
+
+    // Add it to the list
     copy = apr_pcalloc(conf->pool, sizeof(*copy));
     apr_cpystrn(copy->token, token, sizeof(copy->token));
     copy->next = conf->tokens;
