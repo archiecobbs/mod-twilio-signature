@@ -18,6 +18,7 @@
  */
 
 #include "apr_lib.h"
+#include "apr_strings.h"
 #include "ap_config.h"
 
 #include <assert.h>
