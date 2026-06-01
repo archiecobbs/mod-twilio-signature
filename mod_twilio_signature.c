@@ -305,7 +305,7 @@ check_twilio_signature(request_rec *r)
 
     // Find the header
     if ((header_value = apr_table_get(r->headers_in, SIGNATURE_HEADER)) == NULL) {
-        ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r, "Twilio signature required but no header found");
+        ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r, "Twilio signature required but no \"%s\" header found", SIGNATURE_HEADER);
         return HTTP_UNAUTHORIZED;
     }
 
