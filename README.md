@@ -85,7 +85,7 @@ File format notes:
 * Lines that are blank, all whitespace, or start with `#` are ignored.
 * Otherwise, each line must contain one or more tokens separated by whitespace.
 
-The file(s) are read at startup and on server reload.
+The file(s) are read at startup and on server reload and then the contents are cached; they are *not* read anew for each request. If you update the file, you need to reload or restart Apache.
 
 You may combine inline tokens via `TwilioSignatureAuthToken` and tokens from files via `TwilioSignatureAuthTokenFile`.
 
