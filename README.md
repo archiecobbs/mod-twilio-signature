@@ -21,7 +21,7 @@ For example, to require auth token `e25b2c593ab0def7e23c11d83349868a` for reques
 
 ```
 <Location "/my/twilio/webapp">
-    TwilioSignatureRequired yes
+    TwilioSignatureRequired on
     TwilioSignatureAuthToken e25b2c593ab0def7e23c11d83349868a
 </Location>
 ```
@@ -29,11 +29,11 @@ For example, to require auth token `e25b2c593ab0def7e23c11d83349868a` for reques
 Some important notes:
 
 * Authentication tokens are always **32 lowercase hex digits**
-* `TwilioSignatureRequired` defaults to **no**
+* `TwilioSignatureRequired` defaults to **off**
 
 It's also possible to inherit an explicit **no** from an outer context.
 
-**Therefore, to be safe, always specify `TwilioSignatureRequired yes` when you want to enforce signature validation**.
+**Therefore, to be safe, always specify `TwilioSignatureRequired on` when you want to enforce signature validation**.
 
 If you do something like this:
 
@@ -49,7 +49,7 @@ So then you would be able to just do this:
 
 ```
 <Location "/more/specific/location">
-    TwilioSignatureRequired yes
+    TwilioSignatureRequired on
 </Location>
 ```
 
@@ -61,7 +61,7 @@ You can specify more than one auth token, for example, if multiple Twilio accoun
 
 ```
 <Location "/my/twilio/webapp">
-    TwilioSignatureRequired yes
+    TwilioSignatureRequired on
     TwilioSignatureAuthToken e25b2c593ab0def7e23c11d83349868a
     TwilioSignatureAuthToken 50c58e17c65c7aea5c48602ccc599936
     TwilioSignatureAuthToken bf566019b534f44845094713c9dc46f0
@@ -76,7 +76,7 @@ Putting auth tokens in config files is somewhat insecure. Instead, you can store
 
 ```
 <Location "/my/twilio/webapp">
-    TwilioSignatureRequired yes
+    TwilioSignatureRequired on
     TwilioSignatureAuthTokenFile /etc/apache2/auth-tokens.txt
 </Location>
 ```
@@ -109,7 +109,7 @@ You can override the URI used in the signature calculation. This might be needed
 
 ```
 <Location "/private/foobar">
-    TwilioSignatureRequired yes
+    TwilioSignatureRequired on
     TwilioSignatureAuthTokenFile /etc/apache2/auth-tokens.txt
     TwilioSignatureOverrideURI https://public.website.com/some/path/foobar
 </Location>
@@ -131,11 +131,11 @@ For example:
 
 ```
 <Location "/foo">
-    TwilioSignatureRequired yes
+    TwilioSignatureRequired on
     TwilioSignatureAuthTokenFile /etc/apache2/secrets/tokens1.txt
 </Location>
 <Location "/foo/bar">
-    TwilioSignatureRequired yes
+    TwilioSignatureRequired on
     TwilioSignatureAuthTokenFile /etc/apache2/secrets/tokens2.txt
 </Location>
 ```
