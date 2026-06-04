@@ -1,4 +1,4 @@
-Version 0.9.3
+Version 0.9.3 Released June 4, 2026
 
     - Fix bug where POST request payloads were being zeroed out
 
