@@ -93,7 +93,7 @@ You may combine inline tokens via `TwilioSignatureAuthToken` and tokens from fil
 
 When a request fails to authenticate, a message is logged at level INFO.
 
-All other messages are logged at level TRACE1.
+All other messages are logged at level TRACE1 or lower.
 
 If necessary for debugging, you can increase the logging level using [Per-module logging](https://httpd.apache.org/docs/current/logs.html#permodule).
 

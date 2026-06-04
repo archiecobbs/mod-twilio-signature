@@ -298,7 +298,7 @@ check_twilio_signature(request_rec *r)
 
     // If a subrequest, trust the main request to have done any check already
     if (!ap_is_initial_req(r)) {
-        ap_log_rerror(APLOG_MARK, APLOG_TRACE1, 0, r, "Twilio signature verification skipped for subrequest");
+        ap_log_rerror(APLOG_MARK, APLOG_TRACE2, 0, r, "Twilio signature verification skipped for subrequest");
         return DECLINED;
     }
 
