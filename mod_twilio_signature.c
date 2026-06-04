@@ -20,6 +20,7 @@
 #include "apr_lib.h"
 #include "ap_config.h"
 #include "apr_base64.h"
+#include "apr_buckets.h"
 
 // Fix libapr pollution
 #undef PACKAGE_BUGREPORT
@@ -37,6 +38,7 @@
 #include "httpd.h"
 #include "http_log.h"
 #include "http_request.h"
+#include "http_protocol.h"
 
 #include <ctype.h>
 
@@ -52,6 +54,7 @@
 #define SIGNATURE_LENGTH_BINARY         20                                  // Length (in bytes) of Twilio SHA1 signature
 #define SIGNATURE_LENGTH_BASE64         ((((SIGNATURE_LENGTH_BINARY * 8) + 23) / 24) * 4)
 #define INVALID_TOKEN_ERROR_MESSAGE     "invalid Twilio auth token (must be 32 lowercase hex digits)"
+#define MAX_PRELOAD_BODY_LENGTH         (1024 * 1024)                       // 1MB
 
 // Defaults
 #define DEFAULT_ENABLED                 0                                   // default for TwilioSignatureRequired
@@ -81,6 +84,7 @@ static void         add_auth_token_to_list(struct twilsig_config *const conf, co
 static int          check_twilio_signature(request_rec *r);
 static int          compute_signature(const struct twilsig_config *conf, const char *token,
                         request_rec *r, int https, int port, apr_array_header_t *post_params, u_char *hmac);
+static int          preload_body(request_rec *r, apr_size_t max_length);
 static void         digest(struct hmac_ctx *ctx, request_rec *r, int show_calculation, const char *description, const char *value);
 static int          connection_is_https(conn_rec *c);
 static int          compare_param_names(const void *const ptr1, const void *const ptr2);
@@ -289,6 +293,7 @@ check_twilio_signature(request_rec *r)
     int ports[2];
     int https;
     int port;
+    int rv;
     int i;
 
     // If a subrequest, trust the main request to have done any check already
@@ -330,10 +335,14 @@ check_twilio_signature(request_rec *r)
     // For POST requests, extract the name/value pairs from the body
     if (r->method_number == M_POST) {
 
+        // Load the body into memory so it can be read more than once
+        if ((rv = preload_body(r, MAX_PRELOAD_BODY_LENGTH)) != APR_SUCCESS)
+            return rv;
+
         // Get POST parameters
         if (ap_parse_form_data(r, NULL, &post_params, -1, HUGE_STRING_LEN) != OK || post_params == NULL) {
             ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r, "Twilio signature required but request is not compatible");
-            return -1;
+            return HTTP_BAD_REQUEST;
         }
 
         // Sort params by name
@@ -364,10 +373,14 @@ check_twilio_signature(request_rec *r)
                 return HTTP_UNAUTHORIZED;
             }
             if (memcmp(signature, hmac, SIGNATURE_LENGTH_BINARY) == 0) {
+
+                // Debug
                 if (show_calculation) {
                     ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r,
                       "twilio-signature: signature \"%s\" matched token #%d", header_value, token_count);
                 }
+
+                // Success!
                 ap_log_rerror(APLOG_MARK, APLOG_TRACE1, 0, r, "Twilio signature verified (via token #%d)", token_count);
                 return DECLINED;
             }
@@ -496,6 +509,83 @@ compute_signature(const struct twilsig_config *conf, const char *token, request_
 
     // Done
     return 0;
+}
+
+static int
+preload_body(request_rec *r, apr_size_t max_length)
+{
+    apr_bucket_brigade *body;
+    apr_bucket_brigade *bb;
+    apr_size_t length = 0;
+    int seen_eos = 0;
+    apr_status_t rv;
+
+    // Already preloaded?
+    if (r->kept_body != NULL)
+        return APR_SUCCESS;
+
+    // Read in body, up to "max_length" bytes
+    body = apr_brigade_create(r->pool, r->connection->bucket_alloc);
+    bb = apr_brigade_create(r->pool, r->connection->bucket_alloc);
+    while (!seen_eos) {
+
+        // Grab another chunk of data
+        apr_brigade_cleanup(bb);
+        rv = ap_get_brigade(r->input_filters, bb, AP_MODE_READBYTES, APR_BLOCK_READ, HUGE_STRING_LEN);
+        if (rv != APR_SUCCESS) {
+            if (APR_STATUS_IS_EOF(rv)) {
+                rv = APR_SUCCESS;
+                break;
+            }
+            goto fail;
+        }
+
+        // "Copy" it
+#pragma GCC diagnostic push "-Wcast-qual"
+#pragma GCC diagnostic ignored "-Wcast-qual"
+        while (!APR_BRIGADE_EMPTY(bb)) {
+            apr_size_t new_length;
+
+            // Get next bucket
+            apr_bucket *bucket = APR_BRIGADE_FIRST(bb);
+
+            // Check for special buckets
+            if (APR_BUCKET_IS_EOS(bucket)) {
+                seen_eos = 1;
+                break;
+            }
+            if (APR_BUCKET_IS_FLUSH(bucket) || bucket->length == 0) {
+                apr_bucket_delete(bucket);
+                continue;
+            }
+
+            // Check for overflow
+            new_length = length + bucket->length;
+            if (new_length < 0 || new_length > max_length) {
+                ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
+                  "POST payload exceeds the Twilio signature supported limit %" APR_SIZE_T_FMT, max_length);
+                rv = HTTP_BAD_REQUEST;
+                goto fail;
+            }
+
+            // Append bucket to body
+            APR_BUCKET_REMOVE(bucket);
+            APR_BRIGADE_INSERT_TAIL(body, bucket);
+            length = new_length;
+        }
+#pragma GCC diagnostic pop "-Wcast-qual"
+    }
+
+    // Finish up
+    apr_brigade_destroy(bb);
+    r->kept_body = body;
+    return APR_SUCCESS;
+
+    // Error
+fail:
+    apr_brigade_destroy(body);
+    apr_brigade_destroy(bb);
+    return rv;
 }
 
 static void

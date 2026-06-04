@@ -149,3 +149,7 @@ Then auth tokens from both `tokens1.txt` and `tokens2.txt` are accepted inside l
 Twilio signatures are only defined for two types of requests: `GET` and `POST` with parameters encoded with `application/x-www-form-urlencoded` MIME type.
 
 Validation will fail for any other types of requests.
+
+### POST payloads
+
+Signature validation of POST requests requires reading (but not consuming) the entire request payload. Since the payload data is streaming in over the network, it must be copied/cached in memory. To avoid resource exhaustion, this module imposes a maximum payload length of 1MB, which should be more than enough for an incoming Twilio request. However, if you see `payload exceeds the Twilio signature supported limit` errors then you will need to increase this limit and recompile the module.
