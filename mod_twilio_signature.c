@@ -561,7 +561,7 @@ preload_body(request_rec *r, apr_size_t max_length)
 
             // Check for overflow
             new_length = length + bucket->length;
-            if (new_length < 0 || new_length > max_length) {
+            if (new_length < length || new_length > max_length) {
                 ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
                   "POST payload exceeds the Twilio signature supported limit %" APR_SIZE_T_FMT, max_length);
                 rv = HTTP_BAD_REQUEST;
