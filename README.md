@@ -152,4 +152,16 @@ Validation will fail for any other types of requests.
 
 ### POST payloads
 
-Signature validation of POST requests requires reading (but not consuming) the entire request payload. Since the payload data is streaming in over the network, it must be copied/cached in memory. To avoid resource exhaustion, this module imposes a maximum payload length of 1MB, which should be more than enough for an incoming Twilio request. However, if you see `payload exceeds the Twilio signature supported limit` errors then you will need to increase this limit and recompile the module.
+Signature validation of POST requests requires reading (but not consuming) the entire request payload. Since the payload data is streaming in over the network, it must be copied/cached in memory. To avoid resource exhaustion, this module imposes a maximum payload length of 1MB, which should be more than enough for an incoming Twilio request.
+
+POST requests that exceed the limit will return a `413 Content Too Large` error and Apache will log `payload exceeds the Twilio signature supported limit`. You can increase this limit if needed using the `TwilioSignatureMaxBodySize` directive:
+
+```
+<Location "/my/twilio/webapp">
+    TwilioSignatureRequired on
+    TwilioSignatureAuthToken e25b2c593ab0def7e23c11d83349868a
+
+    # Handle POST payloads up to 10MB
+    TwilioSignatureMaxBodySize 10485760
+</Location>
+```

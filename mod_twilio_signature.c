@@ -54,11 +54,11 @@
 #define SIGNATURE_LENGTH_BINARY         20                                  // Length (in bytes) of Twilio SHA1 signature
 #define SIGNATURE_LENGTH_BASE64         ((((SIGNATURE_LENGTH_BINARY * 8) + 23) / 24) * 4)
 #define INVALID_TOKEN_ERROR_MESSAGE     "invalid Twilio auth token (must be 32 lowercase hex digits)"
-#define MAX_PRELOAD_BODY_LENGTH         (1024 * 1024)                       // 1MB
 
 // Defaults
 #define DEFAULT_ENABLED                 0                                   // default for TwilioSignatureRequired
 #define DEFAULT_SHOW_CALCULATION        0                                   // default for TwilioSignatureShowCalculation
+#define DEFAULT_MAX_BODY_SIZE           (1024 * 1024)                       // 1MB
 
 // One auth token in a list
 struct twilsig_token {
@@ -71,6 +71,7 @@ struct twilsig_config {
     int                     enabled;            // 0 = no, 1 = yes, -1 = default
     int                     show_calculation;   // 0 = no, 1 = yes, -1 = default
     const char              *override_uri;
+    apr_off_t               max_body_size;      // >0 = value, 0 = default
     apr_pool_t              *pool;
     struct twilsig_token    *tokens;            // valid auth tokens
     struct hmac_engine      *engine;
@@ -84,7 +85,9 @@ static void         add_auth_token_to_list(struct twilsig_config *const conf, co
 static const char   *handle_auth_token_directive(cmd_parms *cmd, void *config, const char *token);
 static const char   *handle_auth_token_file_directive(cmd_parms *cmd, void *config, const char *path);
 static const char   *handle_override_uri_directive(cmd_parms *cmd, void *config, const char *uri);
+static const char   *handle_max_body_size_directive(cmd_parms *cmd, void *dconf, const char *arg);
 static int          merge_flag(int outer_flag, int inner_flag);
+static apr_off_t    merge_size(apr_off_t outer_value, apr_off_t inner_value);
 static char         *merge_string(apr_pool_t *pool, const char *outer_string, const char *inner_string);
 static void         register_hooks(apr_pool_t *p);
 
@@ -124,6 +127,11 @@ static const command_rec twilio_signature_cmds[] =
         NULL,
         ACCESS_CONF,
         "override URI used in Twilio signature calculation"),
+    AP_INIT_TAKE1("TwilioSignatureMaxBodySize",
+        handle_max_body_size_directive,
+        NULL,
+        ACCESS_CONF,
+        "Maximum size of a POST request payload"),
     AP_INIT_FLAG("TwilioSignatureShowCalculation",
         ap_set_flag_slot,
         (void *)APR_OFFSETOF(struct twilsig_config, show_calculation),
@@ -152,6 +160,7 @@ create_twilio_signature_dir_config(apr_pool_t *pool, char *d)
     conf->enabled = -1;
     conf->show_calculation = -1;
     conf->override_uri = NULL;
+    conf->max_body_size = 0;
     conf->engine = hmac_engine_create(conf->pool);
     return conf;
 }
@@ -167,6 +176,7 @@ merge_twilio_signature_dir_config(apr_pool_t *pool, void *base_conf, void *new_c
     // Merge simple fields
     conf->enabled = merge_flag(conf1->enabled, conf2->enabled);
     conf->show_calculation = merge_flag(conf1->show_calculation, conf2->show_calculation);
+    conf->max_body_size = merge_size(conf1->max_body_size, conf2->max_body_size);
     conf->override_uri = merge_string(pool, conf1->override_uri, conf2->override_uri);
 
     // Merge the auth token lists by simply combining them
@@ -269,6 +279,19 @@ configure_auth_token(struct twilsig_config *const conf, const char *token)
     return 0;
 }
 
+static const char *
+handle_max_body_size_directive(cmd_parms *cmd, void *dconf, const char *arg)
+{
+    struct twilsig_config *const conf = dconf;
+    char *end = NULL;
+
+    if (apr_strtoff(&conf->max_body_size, arg, &end, 10) != APR_SUCCESS
+      || conf->max_body_size <= 0
+      || *end != '\0')
+        return "TwilioSignatureMaxBodySize must be a valid non-zero size in bytes";
+    return NULL;
+}
+
 ////////////////////////
 // INTERNAL FUNCTIONS //
 ////////////////////////
@@ -332,7 +355,7 @@ check_twilio_signature(request_rec *r)
     if (r->method_number == M_POST) {
 
         // Load the body into memory so it can be read more than once
-        if ((rv = preload_body(r, MAX_PRELOAD_BODY_LENGTH)) != APR_SUCCESS)
+        if ((rv = preload_body(r, merge_size(DEFAULT_MAX_BODY_SIZE, conf->max_body_size))) != APR_SUCCESS)
             return rv;
 
         // Get POST parameters
@@ -560,7 +583,7 @@ preload_body(request_rec *r, apr_size_t max_length)
             if (new_length < length || new_length > max_length) {
                 ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
                   "POST payload exceeds the Twilio signature supported limit %" APR_SIZE_T_FMT, max_length);
-                rv = HTTP_BAD_REQUEST;
+                rv = HTTP_REQUEST_ENTITY_TOO_LARGE;
                 goto fail;
             }
 
@@ -632,6 +655,12 @@ static int
 merge_flag(int outer_flag, int inner_flag)
 {
     return inner_flag != -1 ? inner_flag : outer_flag;
+}
+
+static apr_off_t
+merge_size(apr_off_t outer_value, apr_off_t inner_value)
+{
+    return inner_value != 0 ? inner_value : outer_value;
 }
 
 static char *
