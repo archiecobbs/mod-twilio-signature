@@ -304,7 +304,7 @@ check_twilio_signature(request_rec *r)
 
     // Is signature validation required?
     if (!read_flag(conf->enabled, DEFAULT_ENABLED)) {
-        ap_log_rerror(APLOG_MARK, APLOG_TRACE1, 0, r, "Twilio signature verification disabled");
+        ap_log_rerror(APLOG_MARK, APLOG_TRACE2, 0, r, "Twilio signature verification disabled");
         return DECLINED;
     }
 
