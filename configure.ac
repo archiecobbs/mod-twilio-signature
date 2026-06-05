@@ -17,11 +17,11 @@
 # limitations under the License.
 #
 
-AC_INIT([mod_twilio_signature Apache Module for Verifying Twilio Request Signatures], [0.9.3], [https://github.com/archiecobbs/mod-twilio-signature], [mod_twilio_signature])
+AC_INIT([mod_twilio_signature Apache Module for Verifying Twilio Request Signatures],[0.9.3],[https://github.com/archiecobbs/mod-twilio-signature],[mod_twilio_signature])
 AC_CONFIG_AUX_DIR(scripts)
 AM_INIT_AUTOMAKE
 dnl AM_MAINTAINER_MODE
-AC_PREREQ(2.59)
+AC_PREREQ([2.72])
 AC_PREFIX_DEFAULT(/usr)
 AC_PROG_MAKE_SET
 
@@ -55,20 +55,18 @@ AC_CHECK_LIB(apr-1, apr_file_lock,,
 	[AC_MSG_ERROR([required library libapr missing])])
 
 # Check for required header files
-AC_HEADER_STDC
 AC_CHECK_HEADERS(ctype.h errno.h openssl/evp.h openssl/hmac.h openssl/sha.h stdio.h string.h unistd.h, [],
 	[AC_MSG_ERROR([required header file '$ac_header' not found])])
 AC_CHECK_HEADERS(err.h, [], [])
 
 # Command line flags
 AC_ARG_ENABLE(Werror,
-    AC_HELP_STRING([--enable-Werror],
-        [enable compilation with -Werror flag (default NO)]),
+    AS_HELP_STRING([--enable-Werror],[enable compilation with -Werror flag (default NO)]),
     [test x"$enableval" = "xyes" && CFLAGS="${CFLAGS} -Werror"])
 
 # Generated files
 AC_CONFIG_FILES(Makefile)
-AM_CONFIG_HEADER(config.h)
+AC_CONFIG_HEADERS(config.h)
 
 # Go
 AC_OUTPUT
