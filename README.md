@@ -4,7 +4,7 @@
 
 Verification is performed by validating the `X-Twilio-Signature` HTTP header, which contains a base-64 encoded signature [described here](https://www.twilio.com/docs/usage/security#validating-requests).
 
-When verification is enabled, if a request is received that either doesn't contain a `X-Twilio-Signature` HTTP header, or contains an invalid signature, then a `401 Unauthorized` error status is returned.
+When verification is enabled, if a request is received that either doesn't contain a `X-Twilio-Signature` HTTP header, or the header contains an invalid signature, then a `403 Forbidden` error status is returned.
 
 ## Basic Configuration
 

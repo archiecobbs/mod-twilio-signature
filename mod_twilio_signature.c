@@ -331,7 +331,7 @@ check_twilio_signature(request_rec *r)
     // Find the header
     if ((header_value = apr_table_get(r->headers_in, SIGNATURE_HEADER)) == NULL) {
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r, "Twilio signature required but no \"%s\" header found", SIGNATURE_HEADER);
-        return HTTP_UNAUTHORIZED;
+        return HTTP_FORBIDDEN;
     }
 
     // Verify the signature looks like base 64 and has the right length
@@ -339,13 +339,13 @@ check_twilio_signature(request_rec *r)
         if (!isalnum(*s) && *s != '=' && *s != '/' && *s != '+') {
             ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r,
               "Twilio signature contains an invalid (non-base64) character at offset %d", (int)(s - header_value));
-            return HTTP_UNAUTHORIZED;
+            return HTTP_FORBIDDEN;
         }
     }
     if (s - header_value != SIGNATURE_LENGTH_BASE64) {
         ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r, "Twilio signature has the wrong length %d != %d",
           (int)(s - header_value), SIGNATURE_LENGTH_BASE64);
-        return HTTP_UNAUTHORIZED;
+        return HTTP_FORBIDDEN;
     }
 
     // Decode the signature
@@ -427,7 +427,7 @@ check_twilio_signature(request_rec *r)
         for (i = 0; i < num_ports; i++) {
             if (compute_signature(conf, token->token, token_count, r, https, ports[i], post_params, hmac) == -1) {
                 ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r, "Twilio signature required but request is not compatible");
-                return HTTP_UNAUTHORIZED;
+                return HTTP_FORBIDDEN;
             }
             if (memcmp(signature, hmac, SIGNATURE_LENGTH_BINARY) == 0) {
 
@@ -463,7 +463,7 @@ check_twilio_signature(request_rec *r)
           "Twilio signature does not match any of %d configured auth tokens", token_count);
         break;
     }
-    return HTTP_UNAUTHORIZED;
+    return HTTP_FORBIDDEN;
 }
 
 static int

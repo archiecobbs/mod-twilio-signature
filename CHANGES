@@ -1,3 +1,7 @@
+Version Next
+
+    - Reject with 403 Forbidden instead of 401 Unauthorized
+
 Version 0.9.4 Released June 6, 2026
 
     - Add "TwilioSignatureMaxBodySize" directive
