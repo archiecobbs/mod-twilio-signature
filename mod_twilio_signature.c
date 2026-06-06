@@ -179,10 +179,10 @@ merge_twilio_signature_dir_config(apr_pool_t *pool, void *base_conf, void *new_c
     conf->max_body_size = merge_size(conf1->max_body_size, conf2->max_body_size);
     conf->override_uri = merge_string(pool, conf1->override_uri, conf2->override_uri);
 
-    // Merge the auth token lists by simply combining them
-    for (token = conf1->tokens; token != NULL; token = token->next)
-        add_auth_token_to_list(conf, token->token);
+    // Merge the auth token lists by simply combining them (inner before outer)
     for (token = conf2->tokens; token != NULL; token = token->next)
+        add_auth_token_to_list(conf, token->token);
+    for (token = conf1->tokens; token != NULL; token = token->next)
         add_auth_token_to_list(conf, token->token);
 
     // Done
@@ -587,20 +587,21 @@ compare_param_names(const void *const ptr1, const void *const ptr2)
 static void
 add_auth_token_to_list(struct twilsig_config *const conf, const char *token)
 {
-    struct twilsig_token *copy;
+    struct twilsig_token **tp;
     struct twilsig_token *t;
 
-    // Is it already in the list?
-    for (t = conf->tokens; t != NULL; t = t->next) {
-        if (strcmp(t->token, token) == 0)
+    // Find the end of the list, and check for a duplicate
+    for (tp = &conf->tokens; *tp != NULL; tp = &(*tp)->next) {
+        if (strcmp((*tp)->token, token) == 0)
             return;
     }
 
-    // Add it to the list
-    copy = apr_pcalloc(conf->pool, sizeof(*copy));
-    apr_cpystrn(copy->token, token, sizeof(copy->token));
-    copy->next = conf->tokens;
-    conf->tokens = copy;
+    // Create new token structure
+    t = apr_pcalloc(conf->pool, sizeof(*t));
+    apr_cpystrn(t->token, token, sizeof(t->token));
+
+    // Append it to the list
+    *tp = t;
 }
 
 static int

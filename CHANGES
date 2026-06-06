@@ -1,5 +1,6 @@
 Version Next
 
+    - Try tokens in the order specified, inner contexts before outer
     - Reject with 403 Forbidden instead of 401 Unauthorized
 
 Version 0.9.4 Released June 6, 2026
