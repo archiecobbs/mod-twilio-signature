@@ -111,7 +111,7 @@ static const command_rec twilio_signature_cmds[] =
         ap_set_flag_slot,
         (void *)APR_OFFSETOF(struct twilsig_config, enabled),
         ACCESS_CONF,
-        "enable Twilio signature validation"),
+        "Enable Twilio signature validation"),
     AP_INIT_TAKE1("TwilioSignatureAuthToken",
         handle_auth_token_directive,
         NULL,
@@ -121,12 +121,12 @@ static const command_rec twilio_signature_cmds[] =
         handle_auth_token_file_directive,
         NULL,
         ACCESS_CONF,
-        "file containing Twilio auth token(s)"),
+        "Text file containing Twilio auth token(s)"),
     AP_INIT_TAKE1("TwilioSignatureOverrideURI",
         handle_override_uri_directive,
         NULL,
         ACCESS_CONF,
-        "override URI used in Twilio signature calculation"),
+        "Override URI used in Twilio signature calculation"),
     AP_INIT_TAKE1("TwilioSignatureMaxBodySize",
         handle_max_body_size_directive,
         NULL,
@@ -136,7 +136,7 @@ static const command_rec twilio_signature_cmds[] =
         ap_set_flag_slot,
         (void *)APR_OFFSETOF(struct twilsig_config, show_calculation),
         ACCESS_CONF,
-        "enable debug logging of signature calculation"),
+        "Enable debug logging of signature calculation"),
     { NULL }
 };
 
