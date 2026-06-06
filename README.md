@@ -130,7 +130,7 @@ In any case, if mulitiple auth tokens are available they always tried in a well-
 * In a given context, tokens are tried in the order they are specified in that context (whether inline or from a file).
 * Tokens specified in an inner context are tried before tokens specified in any outer context that contains it
 
-Finally, the same token is never tried more than once for any given request.
+Finally, the same token is never tried more than once for any given request, so duplicates are not harmful.
 
 ### Logging
 
@@ -162,7 +162,7 @@ LogLevel twilio_signature:debug
 
 Twilio signatures are only defined for two types of requests: `GET` and `POST` with parameters encoded with `application/x-www-form-urlencoded` MIME type.
 
-Validation will fail for any other types of requests.
+Validation will fail for any other types of requests with `405 Method Not Allowed` or `400 Bad Request`.
 
 ### POST Body Size Limit
 
