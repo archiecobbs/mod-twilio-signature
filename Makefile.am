@@ -19,7 +19,7 @@
 
 all-local:    module
 
-module: mod_twilio_signature.c hmac.c
+module: mod_twilio_signature.c hmac.c payload.c
 		if test "$(srcdir)" != "."; then $(CP) $(srcdir)/mod_twilio_signature.c .; fi
 		$(APXS) -c -D_REENTRANT `echo $(GCC_WARN_FLAGS) | sed 's/ -/ -Wc,-/g'` -l crypto $^
 
@@ -30,8 +30,8 @@ install-exec-local: module
 install-exec-hook:
 		test -z "$(STRIP)" || $(STRIP) $(DESTDIR)`$(APXS) -q LIBEXECDIR`/mod_twilio_signature.so
 
-noinst_HEADERS=     hmac.h
+noinst_HEADERS=     hmac.h payload.h
 
 CLEANFILES=         *.la *.lo *.o *.so *.slo .libs/*
 
-EXTRA_DIST=         CHANGES LICENSE README.md mod_twilio_signature.c hmac.c
+EXTRA_DIST=         CHANGES LICENSE README.md mod_twilio_signature.c hmac.c payload.c

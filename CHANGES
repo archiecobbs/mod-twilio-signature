@@ -1,6 +1,7 @@
 Version Next
 
     - Add "TwilioSignatureMaxBodySize" directive
+    - Fix more bugs with handling POST request payloads
 
 Version 0.9.3 Released June 4, 2026
 

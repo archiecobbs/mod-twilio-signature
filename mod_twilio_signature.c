@@ -45,6 +45,7 @@
 #include <mod_ssl.h>
 
 #include "hmac.h"
+#include "payload.h"
 
 // Macros
 #define SIGNATURE_HEADER                "X-Twilio-Signature"                // Twilio signature header
@@ -93,9 +94,8 @@ static void         register_hooks(apr_pool_t *p);
 
 // Processing related stuff
 static int          check_twilio_signature(request_rec *r);
-static int          compute_signature(const struct twilsig_config *conf, const char *token,
+static int          compute_signature(const struct twilsig_config *conf, const char *token, int token_num,
                         request_rec *r, int https, int port, apr_array_header_t *post_params, u_char *hmac);
-static int          preload_body(request_rec *r, apr_size_t max_length);
 static void         digest(struct hmac_ctx *ctx, request_rec *r, int show_calculation, const char *description, const char *value);
 static int          connection_is_https(conn_rec *c);
 static int          compare_param_names(const void *const ptr1, const void *const ptr2);
@@ -193,6 +193,7 @@ static void
 register_hooks(apr_pool_t *p)
 {
     ap_hook_access_checker(check_twilio_signature, NULL, NULL, APR_HOOK_MIDDLE);
+    payload_init();
 }
 
 ////////////////////////
@@ -351,14 +352,34 @@ check_twilio_signature(request_rec *r)
     memset(signature, 0, sizeof(signature));                // just to be safe
     apr_base64_decode_binary(signature, header_value);
 
-    // For POST requests, extract the name/value pairs from the body
-    if (r->method_number == M_POST) {
+    // Method must be GET or POST
+    switch (r->method_number) {
 
-        // Load the body into memory so it can be read more than once
-        if ((rv = preload_body(r, merge_size(DEFAULT_MAX_BODY_SIZE, conf->max_body_size))) != APR_SUCCESS)
+    // For GET requests, nothing special needed
+    case M_GET:
+        break;
+
+    // For POST requests, we need to extract the name/value pairs from the body
+    case M_POST:
+    {
+        const apr_off_t max_length = merge_size(DEFAULT_MAX_BODY_SIZE, conf->max_body_size);
+        struct payload_copy *payload;
+
+        // Grab the request payload
+        if ((rv = payload_read(r, APR_BLOCK_READ, &payload, max_length)) != OK)
             return rv;
 
-        // Get POST parameters
+        // Debug
+        if (show_calculation) {
+            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: read %" APR_SIZE_T_FMT " byte payload: \"%*s\"",
+              payload->length, (int)payload->length, (const char *)payload->data);
+        }
+
+        // Push the payload back into the request for the first time (so we can read the parameters)
+        if ((rv = payload_prepend(r, payload)) != OK)
+            return rv;
+
+        // Read the POST parameters from the request body
         if (ap_parse_form_data(r, NULL, &post_params, -1, HUGE_STRING_LEN) != OK || post_params == NULL) {
             ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r, "Twilio signature required but request is not compatible");
             return HTTP_BAD_REQUEST;
@@ -366,6 +387,23 @@ check_twilio_signature(request_rec *r)
 
         // Sort params by name
         qsort(post_params->elts, post_params->nelts, post_params->elt_size, compare_param_names);
+
+        // Debug
+        if (show_calculation)
+            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: found %d POST parameters", post_params->nelts);
+
+        // Push the payload back into the request for the second time (so the request can be handled normally)
+        if ((rv = payload_prepend(r, payload)) != OK)
+            return rv;
+
+        // Proceed
+        break;
+    }
+
+    // Block all other methods
+    default:
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, "Twilio signature required but request method is %s", r->method);
+        return HTTP_METHOD_NOT_ALLOWED;
     }
 
     // Determine the connection's SSL status and TCP port, and then whether to try explicit/implicit port in URL
@@ -387,7 +425,7 @@ check_twilio_signature(request_rec *r)
     for (token = conf->tokens; token != NULL; token = token->next) {
         token_count++;
         for (i = 0; i < num_ports; i++) {
-            if (compute_signature(conf, token->token, r, https, ports[i], post_params, hmac) == -1) {
+            if (compute_signature(conf, token->token, token_count, r, https, ports[i], post_params, hmac) == -1) {
                 ap_log_rerror(APLOG_MARK, APLOG_INFO, 0, r, "Twilio signature required but request is not compatible");
                 return HTTP_UNAUTHORIZED;
             }
@@ -429,7 +467,7 @@ check_twilio_signature(request_rec *r)
 }
 
 static int
-compute_signature(const struct twilsig_config *conf, const char *token, request_rec *r,
+compute_signature(const struct twilsig_config *conf, const char *token, int token_num, request_rec *r,
     int https, int port, apr_array_header_t *post_params, u_char *hmac)
 {
     const int debug = merge_flag(DEFAULT_SHOW_CALCULATION, conf->show_calculation);
@@ -440,17 +478,8 @@ compute_signature(const struct twilsig_config *conf, const char *token, request_
     // Debug
     if (debug) {
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r,
-          "twilio-signature: computing signature: https=%d, port=%d, token=\"%s\" override URI=\"%s\"",
-          https, port, token, conf->override_uri != NULL ? conf->override_uri : "(null)");
-    }
-
-    // Must be GET or POST
-    switch (r->method_number) {
-    case M_GET:
-    case M_POST:
-        break;
-    default:
-        return -1;
+          "twilio-signature: computing signature: https=%d, port=%d, token#%d=\"%s\" override URI=\"%s\"",
+          https, port, token_num, token, conf->override_uri != NULL ? conf->override_uri : "(null)");
     }
 
     // Create HMAC
@@ -528,83 +557,6 @@ compute_signature(const struct twilsig_config *conf, const char *token, request_
 
     // Done
     return 0;
-}
-
-static int
-preload_body(request_rec *r, apr_size_t max_length)
-{
-    apr_bucket_brigade *body;
-    apr_bucket_brigade *bb;
-    apr_size_t length = 0;
-    int seen_eos = 0;
-    apr_status_t rv;
-
-    // Already preloaded?
-    if (r->kept_body != NULL)
-        return APR_SUCCESS;
-
-    // Read in body, up to "max_length" bytes
-    body = apr_brigade_create(r->pool, r->connection->bucket_alloc);
-    bb = apr_brigade_create(r->pool, r->connection->bucket_alloc);
-    while (!seen_eos) {
-
-        // Grab another chunk of data
-        apr_brigade_cleanup(bb);
-        rv = ap_get_brigade(r->input_filters, bb, AP_MODE_READBYTES, APR_BLOCK_READ, HUGE_STRING_LEN);
-        if (rv != APR_SUCCESS) {
-            if (APR_STATUS_IS_EOF(rv)) {
-                rv = APR_SUCCESS;
-                break;
-            }
-            goto fail;
-        }
-
-        // "Copy" it
-#pragma GCC diagnostic push "-Wcast-qual"
-#pragma GCC diagnostic ignored "-Wcast-qual"
-        while (!APR_BRIGADE_EMPTY(bb)) {
-            apr_size_t new_length;
-
-            // Get next bucket
-            apr_bucket *bucket = APR_BRIGADE_FIRST(bb);
-
-            // Check for special buckets
-            if (APR_BUCKET_IS_EOS(bucket)) {
-                seen_eos = 1;
-                break;
-            }
-            if (APR_BUCKET_IS_FLUSH(bucket) || bucket->length == 0) {
-                apr_bucket_delete(bucket);
-                continue;
-            }
-
-            // Check for overflow
-            new_length = length + bucket->length;
-            if (new_length < length || new_length > max_length) {
-                ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r,
-                  "POST payload exceeds the Twilio signature supported limit %" APR_SIZE_T_FMT, max_length);
-                rv = HTTP_REQUEST_ENTITY_TOO_LARGE;
-                goto fail;
-            }
-
-            // Append bucket to body
-            APR_BUCKET_REMOVE(bucket);
-            APR_BRIGADE_INSERT_TAIL(body, bucket);
-            length = new_length;
-        }
-#pragma GCC diagnostic pop "-Wcast-qual"
-    }
-
-    // Finish up
-    apr_brigade_destroy(bb);
-    r->kept_body = body;
-    return APR_SUCCESS;
-
-    // Error
-fail:
-    apr_brigade_destroy(body);
-    apr_brigade_destroy(bb);
-    return rv;
 }
 
 static void

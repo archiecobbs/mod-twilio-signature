@@ -123,6 +123,11 @@ To enable logging of the details of the signature calculation algorithm for debu
 
 **Warning: this is insecure because it prints authentication tokens in the log.**
 
+To see the debug messages, you may also need to add this directive:
+```
+LogLevel twilio_signature:debug
+```
+
 ### Config Merge
 
 If you declare auth tokens in a context in which an outer context already had them, the new ones will be added to the set.
