@@ -6,16 +6,16 @@ Verification is performed by validating the `X-Twilio-Signature` HTTP header, wh
 
 When verification is enabled, if a request is received that either doesn't contain a `X-Twilio-Signature` HTTP header, or the header contains an invalid signature, then a `403 Forbidden` error status is returned.
 
-## Basic Configuration
+## Configuration
 
 Configuration is straightforward. You need to tell Apache two things:
 
-* When to validate the signature; and
-* The authentication token(s) the signature may be based on
+1. When to validate the signature
+1. The authentication token(s) the signature may be based on
 
-The first item is defined using `TwilioSignatureRequired` directives inside `<Directory>` and `<Location>` tags.
+The first item is defined using the `TwilioSignatureRequired` directive.
 
-The second item is defined using `TwilioSignatureAuthToken` and/or `TwilioSignatureAuthTokenFile` directives.
+The second item is defined using the `TwilioSignatureAuthToken` directive.
 
 For example, to require auth token `e25b2c593ab0def7e23c11d83349868a` for requests to URI paths starting with `/my/twilio/webapp`:
 
@@ -31,7 +31,7 @@ Some important notes:
 * Authentication tokens are always **32 lowercase hex digits**
 * `TwilioSignatureRequired` defaults to **off**
 
-It's also possible to inherit an explicit **no** from an outer context.
+It's also possible to inherit an explicit **off** from an outer context that overrides an explicit **on** in an even more outer context.
 
 **Therefore, to be safe, always specify `TwilioSignatureRequired on` when you want to enforce signature validation**.
 
@@ -45,15 +45,13 @@ If you do something like this:
 
 you have not enabled validation, but you _have_ defined a valid token that will be inherited by more specific locations.
 
-So then you would be able to just do this:
+So in some narrower context you would then be able to just do this:
 
 ```
 <Location "/more/specific/location">
     TwilioSignatureRequired on
 </Location>
 ```
-
-## Advanced Configuration
 
 ### Multiple Auth Tokens
 
@@ -68,11 +66,11 @@ You can specify more than one auth token, for example, if multiple Twilio accoun
 </Location>
 ```
 
-Signatures can then be based on any of the tokens. However, avoid extremely long lists, because there's no way to know ahead of time which token is the right one - each token must be tried one at a time.
+Signatures can then be based on any of the tokens.
 
 ### Auth Tokens from a File
 
-Putting auth tokens in config files is somewhat insecure. Instead, you can store them in a file, which can be more securely protected:
+Putting auth tokens in Apache config files is somewhat insecure. Instead, you can store them in a file, which can be more securely protected:
 
 ```
 <Location "/my/twilio/webapp">
@@ -82,53 +80,14 @@ Putting auth tokens in config files is somewhat insecure. Instead, you can store
 ```
 File format notes:
 * The file must be a text file.
-* Lines that are blank, all whitespace, or start with `#` are ignored.
+* Lines that are empty, all whitespace, or start with `#` are ignored.
 * Otherwise, each line must contain one or more tokens separated by whitespace.
 
-The file(s) are read at startup and on server reload and then the contents are cached; they are *not* read anew for each request. If you update the file, you need to reload or restart Apache.
+File(s) are read at startup, and on server reload, and then the contents are cached; they are *not* read anew for each request. If you update a file, you need to reload or restart Apache to make those changes take effect.
 
-You may combine inline tokens via `TwilioSignatureAuthToken` and tokens from files via `TwilioSignatureAuthTokenFile`.
+You may freely combine inline tokens via `TwilioSignatureAuthToken` and tokens from files via `TwilioSignatureAuthTokenFile`.
 
-### Logging Level
-
-When a request fails to authenticate, a message is logged at level INFO.
-
-All other messages are logged at level TRACE1 or lower.
-
-If necessary for debugging, you can increase the logging level using [Per-module logging](https://httpd.apache.org/docs/current/logs.html#permodule).
-
-For example:
-
-```
-LogLevel twilio_signature:trace1
-```
-
-### Override URI
-
-You can override the URI used in the signature calculation. This might be needed if there is a proxy between Twilio and Apache.
-
-```
-<Location "/private/foobar">
-    TwilioSignatureRequired on
-    TwilioSignatureAuthTokenFile /etc/apache2/auth-tokens.txt
-    TwilioSignatureOverrideURI https://public.website.com/some/path/foobar
-</Location>
-```
-
-You can specify `TwilioSignatureOverrideURI None` to cancel any value inherited from an outer context.
-
-### Calculation Debug
-
-To enable logging of the details of the signature calculation algorithm for debugging purposes, use `TwilioSignatureShowCalculation on`. This will show, for each request, each authentication token tried and the data that digested to compute the signature hash at log level DEBUG.
-
-**Warning: this is insecure because it prints authentication tokens in the log.**
-
-To see the debug messages, you may also need to add this directive:
-```
-LogLevel twilio_signature:debug
-```
-
-### Config Merge
+### Auth Token Inheritance
 
 If you declare auth tokens in a context in which an outer context already had them, the new ones will be added to the set.
 
@@ -147,7 +106,57 @@ For example:
 
 Then auth tokens from both `tokens1.txt` and `tokens2.txt` are accepted inside location `/foo/bar`.
 
+### Override URI
+
+You can override the URI used in the signature calculation. This might be needed if there is a proxy between Twilio and Apache.
+
+```
+<Location "/private/foobar">
+    TwilioSignatureRequired on
+    TwilioSignatureAuthTokenFile /etc/apache2/auth-tokens.txt
+    TwilioSignatureOverrideURI https://public.website.com/some/path/foobar
+</Location>
+```
+
+You can specify `TwilioSignatureOverrideURI None` to cancel a setting inherited from an outer context.
+
 ## Miscellaneous
+
+### Auth Token Ordering
+
+When there are multiple auth tokens configured in a context, there is no way for Apache to know ahead of time which token was used to compute the signature for a given request. Instead, each possible token must be tried one-at-a-time. Since this involves crytographic hashing, for performance reasons you should avoid configuring extremely long lists of auth tokens.
+
+In any case, if mulitiple auth tokens are available they always tried in a well-defined order:
+* In a given context, tokens are tried in the order they are specified in that context (whether inline or from a file).
+* Tokens specified in an inner context are tried before tokens specified in any outer context that contains it
+
+Finally, the same token is never tried more than once for any given request.
+
+### Logging
+
+When a request fails to authenticate, a message is logged at level INFO.
+
+All other messages are logged at level TRACE1 or lower (except for [Calculation Debug](#calculation-debug)).
+
+If necessary for debugging, you can increase the logging level using [Per-module logging](https://httpd.apache.org/docs/current/logs.html#permodule).
+
+For example:
+
+```
+LogLevel twilio_signature:trace1
+```
+
+### Calculation Debug
+
+To enable logging of the details of the signature calculation algorithm for debugging purposes, use `TwilioSignatureShowCalculation on`. This will show, for each request, each authentication token tried and the data that was digested to compute the signature hash.
+
+**Warning: this is insecure because it prints authentication tokens in the log.**
+
+These messages are logged at log level DEBUG. To see them, you may need to add this directive:
+
+```
+LogLevel twilio_signature:debug
+```
 
 ### Compatible Requests
 
@@ -155,11 +164,11 @@ Twilio signatures are only defined for two types of requests: `GET` and `POST` w
 
 Validation will fail for any other types of requests.
 
-### POST payloads
+### POST Body Size Limit
 
-Signature validation of POST requests requires reading (but not consuming) the entire request payload. Since the payload data is streaming in over the network, it must be copied/cached in memory. To avoid resource exhaustion, this module imposes a maximum payload length of 1MB, which should be more than enough for an incoming Twilio request.
+Signature validation of POST requests requires snooping into (but not consuming) the request payload. Since the payload data is streaming in over the network, it must be copied/cached in memory to allow it to be read more than once. To avoid resource exhaustion, this module imposes a maximum payload length of 1MB, which should be more than enough for normal Twilio requests. POST requests that exceed the limit will return a `413 Content Too Large` error and Apache will log the error `payload exceeds the Twilio signature supported limit`.
 
-POST requests that exceed the limit will return a `413 Content Too Large` error and Apache will log `payload exceeds the Twilio signature supported limit`. You can increase this limit if needed using the `TwilioSignatureMaxBodySize` directive:
+If needed, you can increase this limit using the `TwilioSignatureMaxBodySize` directive:
 
 ```
 <Location "/my/twilio/webapp">
