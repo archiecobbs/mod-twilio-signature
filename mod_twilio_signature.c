@@ -69,12 +69,12 @@ struct twilsig_token {
 
 // Module configuration
 struct twilsig_config {
-    int                     enabled;            // 0 = no, 1 = yes, -1 = default
-    int                     show_calculation;   // 0 = no, 1 = yes, -1 = default
+    int                     enabled;                    // 0 = no, 1 = yes, or -1 = not set
+    int                     show_calculation;           // 0 = no, 1 = yes, or -1 = not set
     const char              *override_uri;
-    apr_off_t               max_body_size;      // >0 = value, 0 = default
+    apr_off_t               max_body_size;              // >0 = value, or 0 = not set
     apr_pool_t              *pool;
-    struct twilsig_token    *tokens;            // valid auth tokens
+    struct twilsig_token    *tokens;                    // valid auth tokens, in order to be tried
     struct hmac_engine      *engine;
 };
 
@@ -87,7 +87,7 @@ static const char   *handle_auth_token_directive(cmd_parms *cmd, void *config, c
 static const char   *handle_auth_token_file_directive(cmd_parms *cmd, void *config, const char *path);
 static const char   *handle_override_uri_directive(cmd_parms *cmd, void *config, const char *uri);
 static const char   *handle_max_body_size_directive(cmd_parms *cmd, void *dconf, const char *arg);
-static int          merge_flag(int outer_flag, int inner_flag);
+static int          merge_integer(int outer_flag, int inner_flag);
 static apr_off_t    merge_size(apr_off_t outer_value, apr_off_t inner_value);
 static char         *merge_string(apr_pool_t *pool, const char *outer_string, const char *inner_string);
 static void         register_hooks(apr_pool_t *p);
@@ -174,8 +174,8 @@ merge_twilio_signature_dir_config(apr_pool_t *pool, void *base_conf, void *new_c
     struct twilsig_token *token;
 
     // Merge simple fields
-    conf->enabled = merge_flag(conf1->enabled, conf2->enabled);
-    conf->show_calculation = merge_flag(conf1->show_calculation, conf2->show_calculation);
+    conf->enabled = merge_integer(conf1->enabled, conf2->enabled);
+    conf->show_calculation = merge_integer(conf1->show_calculation, conf2->show_calculation);
     conf->max_body_size = merge_size(conf1->max_body_size, conf2->max_body_size);
     conf->override_uri = merge_string(pool, conf1->override_uri, conf2->override_uri);
 
@@ -301,7 +301,8 @@ static int
 check_twilio_signature(request_rec *r)
 {
     const struct twilsig_config *const conf = ap_get_module_config(r->per_dir_config, &twilio_signature_module);
-    const int show_calculation = merge_flag(DEFAULT_SHOW_CALCULATION, conf->show_calculation);
+    const int show_calculation = merge_integer(DEFAULT_SHOW_CALCULATION, conf->show_calculation);
+    const int https = r->connection != NULL && connection_is_https(r->connection);
     apr_array_header_t *post_params = NULL;
     u_char signature[SIGNATURE_LENGTH_BINARY + 2];      // padding required in case there are fewer equals signs than expected
     u_char hmac[SIGNATURE_LENGTH_BINARY];
@@ -311,8 +312,6 @@ check_twilio_signature(request_rec *r)
     const char *s;
     int num_ports;
     int ports[2];
-    int https;
-    int port;
     int rv;
     int i;
 
@@ -323,7 +322,7 @@ check_twilio_signature(request_rec *r)
     }
 
     // Is signature validation required?
-    if (!merge_flag(DEFAULT_ENABLED, conf->enabled)) {
+    if (!merge_integer(DEFAULT_ENABLED, conf->enabled)) {
         ap_log_rerror(APLOG_MARK, APLOG_TRACE2, 0, r, "Twilio signature verification disabled");
         return DECLINED;
     }
@@ -407,12 +406,12 @@ check_twilio_signature(request_rec *r)
     }
 
     // Determine the connection's SSL status and TCP port, and then whether to try explicit/implicit port in URL
-    https = r->connection != NULL && connection_is_https(r->connection);
-    port = r->connection != NULL && r->connection->local_addr != NULL ? r->connection->local_addr->port : 0;
     num_ports = 0;
     if (conf->override_uri != NULL && strcasecmp(conf->override_uri, OVERRIDE_URI_NONE) == 0)
         ports[num_ports++] = 0;                                                 // port is ignored - override URI is used instead
     else {
+        const int port = r->connection != NULL && r->connection->local_addr != NULL ? r->connection->local_addr->port : 0;
+
         if (port == (https ? DEFAULT_HTTPS_PORT : DEFAULT_HTTP_PORT))           // default port, so implicit port is also possible
             ports[num_ports++] = 0;
         ports[num_ports++] = port;                                              // explicit port is always possible
@@ -470,7 +469,7 @@ static int
 compute_signature(const struct twilsig_config *conf, const char *token, int token_num, request_rec *r,
     int https, int port, apr_array_header_t *post_params, u_char *hmac)
 {
-    const int debug = merge_flag(DEFAULT_SHOW_CALCULATION, conf->show_calculation);
+    const int debug = merge_integer(DEFAULT_SHOW_CALCULATION, conf->show_calculation);
     const char *query_string;
     struct hmac_ctx *ctx;
     char port_buf[16];
@@ -604,18 +603,21 @@ add_auth_token_to_list(struct twilsig_config *const conf, const char *token)
     *tp = t;
 }
 
+// Merge integer values, where -1 means not set
 static int
-merge_flag(int outer_flag, int inner_flag)
+merge_integer(int outer_flag, int inner_flag)
 {
     return inner_flag != -1 ? inner_flag : outer_flag;
 }
 
+// Merge size values, where zero means not set
 static apr_off_t
 merge_size(apr_off_t outer_value, apr_off_t inner_value)
 {
     return inner_value != 0 ? inner_value : outer_value;
 }
 
+// Merge string values, where NULL means not set
 static char *
 merge_string(apr_pool_t *pool, const char *outer_string, const char *inner_string)
 {
