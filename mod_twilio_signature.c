@@ -59,7 +59,9 @@
 // Defaults
 #define DEFAULT_ENABLED                 0                                   // default for TwilioSignatureRequired
 #define DEFAULT_SHOW_CALCULATION        0                                   // default for TwilioSignatureShowCalculation
-#define DEFAULT_MAX_BODY_SIZE           (1024 * 1024)                       // 1MB
+#define DEFAULT_MAX_BODY_SIZE           (1024 * 1024)                       // default for TwilioSignatureMaxBodySize (1MB)
+#define DEFAULT_CALLBACK_TYPE           CALLBACK_TYPE_BOTH                  // default for TwilioSignatureCallbackType
+#define DEFAULT_DEFAULT_PORTS           DEFAULT_PORTS_MAYBE                 // default for TwilioSignatureExplicitDefaultPorts
 
 // One auth token in a list
 struct twilsig_token {
@@ -67,10 +69,34 @@ struct twilsig_token {
     struct twilsig_token    *next;
 };
 
+// Assumed Twilio callback type(s)
+typedef enum {
+    CALLBACK_TYPE_SMS,
+    CALLBACK_TYPE_VOICE,
+    CALLBACK_TYPE_BOTH
+} callback_type_t;
+
+#define CALLBACK_TYPE_NAME_SMS          "SMS"
+#define CALLBACK_TYPE_NAME_VOICE        "Voice"
+#define CALLBACK_TYPE_NAME_BOTH         "Both"
+
+// Whether explicit default ports (80 and 443) appear in callback URLs
+typedef enum {
+    DEFAULT_PORTS_ALWAYS,
+    DEFAULT_PORTS_NEVER,
+    DEFAULT_PORTS_MAYBE,
+} default_ports_t;
+
+#define DEFAULT_PORTS_NAME_ALWAYS       "Always"
+#define DEFAULT_PORTS_NAME_NEVER        "Never"
+#define DEFAULT_PORTS_NAME_MAYBE        "Maybe"
+
 // Module configuration
 struct twilsig_config {
     int                     enabled;                    // 0 = no, 1 = yes, or -1 = not set
     int                     show_calculation;           // 0 = no, 1 = yes, or -1 = not set
+    int                     default_ports;              // >= 0 = value, or -1 = not set
+    callback_type_t         callback_type;              // >= 0 = value, or -1 = not set
     const char              *override_uri;
     apr_off_t               max_body_size;              // >0 = value, or 0 = not set
     apr_pool_t              *pool;
@@ -86,6 +112,8 @@ static void         add_auth_token_to_list(struct twilsig_config *const conf, co
 static const char   *handle_auth_token_directive(cmd_parms *cmd, void *config, const char *token);
 static const char   *handle_auth_token_file_directive(cmd_parms *cmd, void *config, const char *path);
 static const char   *handle_override_uri_directive(cmd_parms *cmd, void *config, const char *uri);
+static const char   *handle_callback_type_directive(cmd_parms *cmd, void *config, const char *type_name);
+static const char   *handle_explicit_ports_directive(cmd_parms *cmd, void *config, const char *ports_name);
 static const char   *handle_max_body_size_directive(cmd_parms *cmd, void *dconf, const char *arg);
 static int          merge_integer(int outer_flag, int inner_flag);
 static apr_off_t    merge_size(apr_off_t outer_value, apr_off_t inner_value);
@@ -127,6 +155,16 @@ static const command_rec twilio_signature_cmds[] =
         NULL,
         ACCESS_CONF,
         "Override URI used in Twilio signature calculation"),
+    AP_INIT_TAKE1("TwilioSignatureCallbackType",
+        handle_callback_type_directive,
+        NULL,
+        ACCESS_CONF,
+        "Twilio callback type(s)"),
+    AP_INIT_TAKE1("TwilioSignatureExplicitDefaultPorts",
+        handle_explicit_ports_directive,
+        NULL,
+        ACCESS_CONF,
+        "Whether callback URLs contain explicit default ports"),
     AP_INIT_TAKE1("TwilioSignatureMaxBodySize",
         handle_max_body_size_directive,
         NULL,
@@ -159,6 +197,8 @@ create_twilio_signature_dir_config(apr_pool_t *pool, char *d)
     conf->pool = pool;
     conf->enabled = -1;
     conf->show_calculation = -1;
+    conf->default_ports = -1;
+    conf->callback_type = -1;
     conf->override_uri = NULL;
     conf->max_body_size = 0;
     conf->engine = hmac_engine_create(conf->pool);
@@ -175,6 +215,8 @@ merge_twilio_signature_dir_config(apr_pool_t *pool, void *base_conf, void *new_c
 
     // Merge simple fields
     conf->enabled = merge_integer(conf1->enabled, conf2->enabled);
+    conf->default_ports = merge_integer(conf1->default_ports, conf2->default_ports);
+    conf->callback_type = merge_integer(conf1->callback_type, conf2->callback_type);
     conf->show_calculation = merge_integer(conf1->show_calculation, conf2->show_calculation);
     conf->max_body_size = merge_size(conf1->max_body_size, conf2->max_body_size);
     conf->override_uri = merge_string(pool, conf1->override_uri, conf2->override_uri);
@@ -262,6 +304,39 @@ handle_override_uri_directive(cmd_parms *cmd, void *config, const char *uri)
     return NULL;
 }
 
+static const char *
+handle_callback_type_directive(cmd_parms *cmd, void *config, const char *type_name)
+{
+    struct twilsig_config *const conf = (struct twilsig_config *)config;
+
+    // Validate
+    if (strcasecmp(type_name, CALLBACK_TYPE_NAME_SMS) == 0)
+        conf->callback_type = CALLBACK_TYPE_SMS;
+    else if (strcasecmp(type_name, CALLBACK_TYPE_NAME_VOICE) == 0)
+        conf->callback_type = CALLBACK_TYPE_VOICE;
+    else if (strcasecmp(type_name, CALLBACK_TYPE_NAME_BOTH) == 0)
+        conf->callback_type = CALLBACK_TYPE_BOTH;
+    else
+        return apr_psprintf(cmd->pool, "invalid Twilio callback type \"%s\"", type_name);
+    return NULL;
+}
+
+static const char *
+handle_explicit_ports_directive(cmd_parms *cmd, void *config, const char *ports_name)
+{
+    struct twilsig_config *const conf = (struct twilsig_config *)config;
+
+    // Validate
+    if (strcasecmp(ports_name, DEFAULT_PORTS_NAME_ALWAYS) == 0)
+        conf->callback_type = DEFAULT_PORTS_ALWAYS;
+    else if (strcasecmp(ports_name, DEFAULT_PORTS_NAME_NEVER) == 0)
+        conf->callback_type = DEFAULT_PORTS_NEVER;
+    else if (strcasecmp(ports_name, DEFAULT_PORTS_NAME_MAYBE) == 0)
+        conf->callback_type = DEFAULT_PORTS_MAYBE;
+    else
+        return apr_psprintf(cmd->pool, "invalid Twilio explicit default ports value \"%s\"", ports_name);
+    return NULL;
+}
 static int
 configure_auth_token(struct twilsig_config *const conf, const char *token)
 {
@@ -411,10 +486,65 @@ check_twilio_signature(request_rec *r)
         ports[num_ports++] = 0;                                                 // port is ignored - override URI is used instead
     else {
         const int port = r->connection->local_addr->port;
+        const int port_is_default_port = port == (https ? DEFAULT_HTTPS_PORT : DEFAULT_HTTP_PORT);
+        const default_ports_t default_ports = merge_integer(DEFAULT_DEFAULT_PORTS, conf->default_ports);
+        const callback_type_t callback_type = merge_integer(DEFAULT_CALLBACK_TYPE, conf->callback_type);
+        default_ports_t ports_to_include;
 
-        if (port == (https ? DEFAULT_HTTPS_PORT : DEFAULT_HTTP_PORT))           // default port, so implicit port is also possible
+        //
+        // Logic to determine whether the hash of the URL may and/or may not include an explicit port number.
+        //
+        // This is when to include the port in the HMAC calculation:
+        //
+        //                     |    SMS     |   Voice
+        //    -----------------+------------+------------
+        //    HTTP port 80     | If present | If present
+        //    HTTP other port  | Always     | Always
+        //    HTTPS port 443   | If present | Never
+        //    HTTPS other port | Always     | Never
+        //
+        // Ref: https://www.twilio.com/docs/usage/security#notes
+        //
+        // "If present" means "if the port was explicitly specifed in the URL configured in Twilio console",
+        // but that's information we don't have, unless "TwilioSignatureExplicitDefaultPorts" is used,
+        // except if an "other port" is used, we do know that it must have been explicitly specifed.
+        //
+        // The variable "ports_to_include" represents what we should do about all this:
+        //
+        //  DEFAULT_PORTS_ALWAYS - We should include the port in the hash
+        //   DEFAULT_PORTS_NEVER - We should not include the port in the hash
+        //   DEFAULT_PORTS_MAYBE - We don't know, so compute two hashes, one with and one without
+        //
+        if (!https) {
+            if (port_is_default_port)                           // HTTP port 80
+                ports_to_include = default_ports;
+            else                                                // HTTP other port
+                ports_to_include = DEFAULT_PORTS_ALWAYS;
+        } else {
+            if (port_is_default_port) {                         // HTTPS port 443
+                if (callback_type == CALLBACK_TYPE_SMS)             // SMS only
+                    ports_to_include = default_ports;
+                else if (callback_type == CALLBACK_TYPE_VOICE)      // Voice only
+                    ports_to_include = DEFAULT_PORTS_NEVER;
+                else if (default_ports == DEFAULT_PORTS_NEVER)      // SMS or Voice - default port never used (for SMS)
+                    ports_to_include = DEFAULT_PORTS_NEVER;
+                else                                                // SMS or Voice - default port might be used (for SMS)
+                    ports_to_include = DEFAULT_PORTS_MAYBE;
+            } else {                                            // HTTPS other port
+                if (callback_type == CALLBACK_TYPE_SMS)             // SMS only
+                    ports_to_include = DEFAULT_PORTS_ALWAYS;
+                else if (callback_type == CALLBACK_TYPE_VOICE)      // Voice only
+                    ports_to_include = DEFAULT_PORTS_NEVER;
+                else                                                // SMS or Voice - it could be either
+                    ports_to_include = DEFAULT_PORTS_MAYBE;
+            }
+        }
+
+        // Apply that logic
+        if (ports_to_include != DEFAULT_PORTS_NEVER)
+            ports[num_ports++] = port;
+        if (ports_to_include != DEFAULT_PORTS_ALWAYS)
             ports[num_ports++] = 0;
-        ports[num_ports++] = port;                                              // explicit port is always possible
     }
 
     // Verify the signature matches some token in our auth token list

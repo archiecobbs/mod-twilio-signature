@@ -120,17 +120,37 @@ You can override the URI used in the signature calculation. This might be needed
 
 You can specify `TwilioSignatureOverrideURI None` to cancel a setting inherited from an outer context.
 
-## Miscellaneous
+## Optimizing Your Configuration
 
 ### Auth Token Ordering
 
 When there are multiple auth tokens configured in a context, there is no way for Apache to know ahead of time which token was used to compute the signature for a given request. Instead, each possible token must be tried one-at-a-time. Since this involves crytographic hashing, for performance reasons you should avoid configuring extremely long lists of auth tokens.
 
-In any case, if mulitiple auth tokens are available they always tried in a well-defined order:
+In any case, if multiple auth tokens are available they always tried in a well-defined order:
 * In a given context, tokens are tried in the order they are specified in that context (whether inline or from a file).
 * Tokens specified in an inner context are tried before tokens specified in any outer context that contains it
 
 Finally, the same token is never tried more than once for any given request, so duplicates are not harmful.
+
+### SMS vs. Voice Requests
+
+Twilio signatures are calculated differently depending on:
+* Whether the request was sent over HTTP or HTTPS
+* Whether the Twilio callback is an SMS callback or a Voice callback
+* Whether the configured URL contains an explicit port number for a default port
+  * For HTTP, this is the difference between `http://example.com/path` and `http://example.com:80/path`
+  * For HTTPS, this is the difference between `https://example.com/path` and `https://example.com:443/path`
+
+**mod\_twilio\_signature** has no way of knowing those latter two pieces of information, so it may have to perform the signature calculation multiple ways before it finds a match.
+
+To avoid that overhead, you can provide this information using either or both of the following directives:
+
+| **Directive** | **Type** | **Value** | **Default** | **Description** |
+|:--------------|:---------|:----------|:------------|:----------------|
+| `TwilioSignatureCallbackType` | String  | `SMS`, `Voice`, or `Both` | `Both`| Twilio callback type(s) |
+| `TwilioSignatureExplicitDefaultPorts` | String  | `Always`, `Never`, or `Maybe` | `Maybe` | Whether explicit default ports are used |
+
+## Miscellaneous
 
 ### Logging
 
