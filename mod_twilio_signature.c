@@ -410,7 +410,7 @@ check_twilio_signature(request_rec *r)
     if (conf->override_uri != NULL && strcasecmp(conf->override_uri, OVERRIDE_URI_NONE) == 0)
         ports[num_ports++] = 0;                                                 // port is ignored - override URI is used instead
     else {
-        const int port = r->connection != NULL && r->connection->local_addr != NULL ? r->connection->local_addr->port : 0;
+        const int port = r->connection->local_addr->port;
 
         if (port == (https ? DEFAULT_HTTPS_PORT : DEFAULT_HTTP_PORT))           // default port, so implicit port is also possible
             ports[num_ports++] = 0;
