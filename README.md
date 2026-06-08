@@ -150,6 +150,8 @@ To avoid that overhead, you can provide this information using either or both of
 | `TwilioSignatureCallbackType` | String  | `SMS`, `Voice`, or `Both` | `Both`| Twilio callback type(s) |
 | `TwilioSignatureExplicitDefaultPorts` | String  | `Always`, `Never`, or `Maybe` | `Maybe` | Whether explicit default ports are used |
 
+But **warning** evidence has appeared that Twilio is not following its own documentation when it comes to voice callbacks. As a workaround, anywhere you would normally want to specify `TwilioSignatureCallbackType Voice` for now you should specify `TwilioSignatureCallbackType Both` instead (or just leave it alone, as this is the default).
+
 ## Miscellaneous
 
 ### Logging
