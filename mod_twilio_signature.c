@@ -445,7 +445,7 @@ check_twilio_signature(request_rec *r)
 
         // Debug
         if (show_calculation) {
-            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: read %" APR_SIZE_T_FMT " byte payload: \"%*s\"",
+            ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, "twilio-signature: read %" APR_SIZE_T_FMT " byte payload: \"%.*s\"",
               payload->length, (int)payload->length, (const char *)payload->data);
         }
 

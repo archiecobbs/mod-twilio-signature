@@ -1,3 +1,7 @@
+Version Next
+
+    - Fix extra payload chars when using TwilioSignatureShowCalculation
+
 Version 1.1.0 Released June 7, 2026
 
     - Fix bug when verifying voice requests over HTTPS
